@@ -1,0 +1,12 @@
+[endpoint]
+url = "http://localhost:8080/v1/chat/completions"
+model = "Echo"
+temperature = 0.7
+max_tokens = 2048
+
+[summarizer]
+url = "http://localhost:8082/v1/chat/completions"
+
+[prompts]
+main_system = "/home/eric/prompts/main_system.txt"
+summarizer = "/home/eric/prompts/summarizer.txt"
