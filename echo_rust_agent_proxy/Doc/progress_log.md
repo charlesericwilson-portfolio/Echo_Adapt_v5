@@ -40,6 +40,7 @@ We kept the proven parts (tmux session management, marker-based output capture, 
 - Sqlite database support for tool logging and better output capture.
 - Added an inner loop to main.rs to allow autonomously chaining tool calls across turns.
 - Added Json function calling support only one tool right now but you can define your tools as needed. But the framework supports all three methods.
+- Swapped to a config.toml for endpoints and system prompts will eventually hold json tool definitions as well so no need to recompile to swap enpoints or system prompts.
 
 ### Current Capabilities (v5)
 - **COMMAND:** method – Stable, one-shot commands, no summarizer
