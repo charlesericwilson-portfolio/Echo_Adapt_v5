@@ -22,7 +22,12 @@ pub struct PromptsConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct SecurityConfig {
-    pub denylist: Vec<String>,     // ← This is new
+    pub denylist: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContextConfig {
+    pub summarize_threshold: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +36,7 @@ pub struct Config {
     pub summarizer: SummarizerConfig,
     pub prompts: PromptsConfig,
     pub security: SecurityConfig,
+    pub context: ContextConfig,
 }
 
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
