@@ -13,11 +13,6 @@ A basic system prompt is included to teach the model the tool format, but you ca
 Current version: Rust v5 (previous Python proxy version was v4)
 The goal of this project is to keep the framework flexible so that the model’s capabilities are the main limitation — not artificial restrictions in the code.
 
-**Current Version:** Rust v5 (Python proxy was v4)
-
-This is the active development version of **Echo project** — a lightweight, local LLM agent tool system written in Rust.
-The goal is to keep the **framework flexible** so the model’s capabilities are the main limitation — not artificial restrictions in the code.
-
 ## Current Status (May 2026)
 
 - **Stable**: `COMMAND:` raw text tool execution
