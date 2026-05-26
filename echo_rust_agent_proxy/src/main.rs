@@ -358,8 +358,8 @@ async fn summarize_context(messages: &mut Vec<Value>) -> anyhow::Result<()> {
     let payload = json!({
         "model": &CONFIG.endpoint.model,
         "messages": messages.clone(),
-        "temperature": 0.3,
-        "max_tokens": 5000
+        "temperature": CONFIG.endpoint.temperature,
+        "max_tokens": CONFIG.endpoint.max_tokens
     });
 
     let response = reqwest::Client::new()
