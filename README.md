@@ -6,7 +6,7 @@ Continuation of [Echo tmux agentv3](https://github.com/charlesericwilson-portfol
 
 **Current Version:** Rust v5 (Python proxy was v4)
 
-This is the active development version of **Echo project** — a lightweight, local LLM agent wrapper written in Rust.
+This is the active development version of **Echo project** — a lightweight, local LLM agent tool system written in Rust.
 The goal is to keep the **framework flexible** so the model’s capabilities are the main limitation — not artificial restrictions in the code.
 
 ## Current Status (May 2026)
