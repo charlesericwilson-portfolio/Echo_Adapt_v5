@@ -11,6 +11,9 @@ url = "http://localhost:8082/v1/chat/completions"
 main_system = "/home/eric/prompts/main_system.txt"
 summarizer = "/home/eric/prompts/summarizer.txt"
 
+[context]
+summarize_threshold = 180000
+
 [security]
 denylist = [
     "rm -rf",
