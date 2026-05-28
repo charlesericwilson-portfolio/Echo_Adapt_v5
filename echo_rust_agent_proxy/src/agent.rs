@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use dirs_next as dirs;
 use std::sync::atomic::Ordering;
 
+use crate::sessions::start_session_cleanup_task;
 use crate::config::Config;
 use crate::db::ToolDatabase;
 use crate::summary::summarize_context;
@@ -54,7 +55,7 @@ pub struct EchoAgent {
     pub messages: Vec<Value>,
     pub db: ToolDatabase,
     pub home_dir: PathBuf,
-    pub active_sessions: Arc<Mutex<HashMap<String, (String, String)>>>,
+    pub active_sessions: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -87,9 +88,8 @@ impl EchoAgent {
         let db = ToolDatabase::new(db_path)?;
 
         let mut messages = vec![];
-
-        // Load optional long-term context file
         let mut context_content = String::new();
+
         if tokio::fs::metadata(&context_path).await.is_ok() {
             context_content = tokio::fs::read_to_string(&context_path).await.unwrap_or_default();
             println!("✅ Loaded context file: {}", context_path.display());
@@ -97,7 +97,6 @@ impl EchoAgent {
             println!("⚠️ Context file not found at: {}", context_path.display());
         }
 
-        // Load and combine system prompt + context
         let main_prompt = tokio::fs::read_to_string(&config.prompts.main_system)
             .await
             .expect("Failed to read main system prompt");
@@ -105,14 +104,22 @@ impl EchoAgent {
         let full_system_prompt = format!("{}\n\n{}", main_prompt.trim(), context_content.trim());
         messages.push(json!({"role": "system", "content": full_system_prompt}));
 
-        Ok(Self {
+        let active_sessions = Arc::new(Mutex::new(HashMap::new()));
+
+        // Create the agent first
+        let agent = Self {
             config,
             messages,
             db,
             home_dir,
-            active_sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        })
+        };
+
+        // Now start the background cleanup task (this is a function call, not a field)
+        start_session_cleanup_task(active_sessions).await;
+
+        Ok(agent)
     }
 
     /// Main interactive loop.
@@ -176,8 +183,6 @@ impl EchoAgent {
     /// having to intervene between every tool call.
     #[allow(unused_assignments)]
     async fn process_turn(&mut self, user_input: &str) -> Result<String> {
-        let mut current_response = String::new();
-
         loop {
             // Build the request payload
             let payload = json!({
@@ -206,48 +211,43 @@ impl EchoAgent {
                 .trim()
                 .to_string();
 
-            current_response = response_text.clone();
-
-            // Log and store the model's response
-            save_chat_log_entry(&self.home_dir, user_input, &current_response, "assistant").await?;
-            self.messages.push(json!({"role": "assistant", "content": &current_response}));
-
-            // === Tool Detection & Dispatch ===
-            // We check the model's response for special prefixes that indicate tool use.
-            // After executing a tool we `continue` the loop so the model can see the result.
-
-            if let Some(json_content) = extract_json_tool(&current_response) {
-                // JSON-style tool call (structured)
-                crate::json::handle_json_tool(self, user_input, &current_response, &json_content).await?;
-                continue;
-            }
-            else if let Some((session_name, command)) = extract_session_command(&current_response) {
-                // Persistent tmux session command
-                crate::sessions::handle_session_command(self, user_input, &session_name, Some(&command)).await?;
-                continue;
-            }
-            else if let Some(session_name) = extract_end_command(&current_response) {
-                // End a tmux session
-                crate::sessions::handle_session_command(self, user_input, &session_name, None).await?;
-                continue;
-            }
-            else if let Some(command) = extract_command(&current_response) {
-                // One-shot command execution
+            // === Check for tool calls FIRST, before pushing anything to history ===
+            if let Some(command) = extract_command(&response_text) {
+                // Push neutral placeholder instead of the raw COMMAND: line
+                self.messages.push(json!({"role": "assistant", "content": "command executed"}));
                 crate::commands::handle_command(self, user_input, &command).await?;
                 continue;
-            }
-            else {
-                // No tool prefix found → this is the final answer
+
+            } else if let Some((session_name, command)) = extract_session_command(&response_text) {
+                self.messages.push(json!({"role": "assistant", "content": "command executed"}));
+                crate::sessions::handle_session_command(self, user_input, &session_name, Some(&command)).await?;
+                continue;
+
+            } else if let Some(session_name) = extract_end_command(&response_text) {
+                self.messages.push(json!({"role": "assistant", "content": "command executed"}));
+                crate::sessions::handle_session_command(self, user_input, &session_name, None).await?;
+                continue;
+
+            } else if let Some(json_content) = extract_json_tool(&response_text) {
+                self.messages.push(json!({"role": "assistant", "content": "json tool executed"}));
+                crate::json::handle_json_tool(self, user_input, &response_text, &json_content).await?;
+                continue;
+
+            } else {
+                // No tool flag found → this is the final answer
+                save_chat_log_entry(&self.home_dir, user_input, &response_text, "assistant").await?;
+                self.messages.push(json!({"role": "assistant", "content": &response_text}));
+
+                // Auto-summarize if context is getting too long
                 let total_chars: usize = self.messages.iter()
                     .map(|m| m["content"].as_str().unwrap_or("").len())
                     .sum();
 
-                // Auto-summarize context if it gets too long
                 if total_chars > self.config.context.summarize_threshold {
                     summarize_context(&mut self.messages, &self.config).await?;
                 }
 
-                return Ok(current_response);
+                return Ok(response_text);
             }
         }
     }

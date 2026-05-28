@@ -26,6 +26,7 @@ pub struct WebSearchConfig {
 #[derive(Debug, Deserialize)]
 pub struct SummarizerConfig {
     pub url: String,
+    pub model: String,
 }
 
 #[derive(Debug, Deserialize)]

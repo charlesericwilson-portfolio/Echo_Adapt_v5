@@ -8,7 +8,7 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
         .expect("Failed to read summarizer prompt");
 
     let payload = json!({
-        "model": "summarizer",
+        "model": &config.summarizer.model,
         "messages": [
             {
                 "role": "system",
@@ -41,6 +41,10 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
 }
 
 pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+
     let summary_prompt = "Summarize the entire conversation so far in a concise way. Keep key facts, decisions, and important details. Output ONLY the summary, nothing else.";
 
     // Build new message list with the summary instruction
@@ -51,14 +55,14 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
         })
     ];
 
-    // Add the recent conversation history (you can limit this if needed)
-    summary_messages.extend(messages.clone());
+    // Add the recent conversation history (skip the original system prompt)
+    summary_messages.extend(messages.iter().skip(1).cloned());
 
     let payload = json!({
         "model": &config.endpoint.model,
         "messages": summary_messages,
-        "temperature": 0.3,           // Lower temp = more focused summary
-        "max_tokens": 1024            // Keep summaries short
+        "temperature": 0.3,
+        "max_tokens": 1024
     });
 
     // Call the model
@@ -80,17 +84,17 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
         return Ok(());
     }
 
-    // Replace the old messages with: [system summary] + last few turns
+    // === FIX: Preserve the original system prompt (messages[0]) ===
+    let system_prompt = messages[0].clone();
     let last_turns: Vec<Value> = messages.iter().rev().take(4).cloned().collect();
-    let mut new_messages = vec![
-        json!({
-            "role": "system",
-            "content": format!("Previous conversation summary:\n{}", summary_text)
-        })
-    ];
+
+    let mut new_messages = vec![system_prompt];
+    new_messages.push(json!({
+        "role": "system",
+        "content": format!("Previous conversation summary:\n{}", summary_text)
+    }));
     new_messages.extend(last_turns.into_iter().rev());
 
     *messages = new_messages;
-
     Ok(())
 }

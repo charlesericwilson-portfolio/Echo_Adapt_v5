@@ -52,13 +52,10 @@ pub async fn handle_json_tool_call_str(tool_call: &str, web_search_url: Option<&
 pub async fn handle_json_tool(
     agent: &mut crate::agent::EchoAgent,
     user_input: &str,
-    current_response: &str,
+    _current_response: &str,
     json_content: &str,
 ) -> Result<()> {
-    println!("{}Echo: Detected JSON tool call{}", crate::agent::LIGHT_BLUE, crate::agent::RESET_COLOR);
-
-    save_chat_log_entry(&agent.home_dir, user_input, current_response, "assistant").await?;
-    agent.messages.push(serde_json::json!({"role": "assistant", "content": current_response}));
+    println!("{}Echo: Detected JSON tool call{}", crate::agent::YELLOW, crate::agent::RESET_COLOR);
 
     // Pull the web search URL from config so the field is actually used
     let web_search_url = agent.config.web_search.as_ref().map(|w| w.url.as_str());
