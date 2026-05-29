@@ -242,22 +242,28 @@ impl EchoAgent {
                 continue;
 
             } else if let Some(session_name) = extract_end_command(&response_text) {
-                // Strip the END_SESSION: flag before appending reasoning/context
-                let cleaned = response_text
-                    .lines()
-                    .filter(|line| !line.trim_start().to_uppercase().starts_with("END_SESSION:"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-                    .trim()
-                    .to_string();
+                // Clean the <end_session> tag from the response
+                let cleaned = if let Some(start) = response_text.find("<end_session") {
+                    if let Some(end) = response_text[start..].find("/>") {
+                        let full_end = start + end + 2;
+                        let before = &response_text[..start];
+                        let after = &response_text[full_end..];
+                        format!("{}{}", before, after).trim().to_string()
+                    } else {
+                        response_text.to_string()
+                    }
+                } else {
+                    response_text.to_string()
+                };
 
                 self.messages.push(json!({"role": "assistant", "content": cleaned}));
+
                 if !cleaned.trim().is_empty() {
                     println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
                 }
+
                 crate::sessions::handle_session_command(self, user_input, &session_name, None).await?;
                 continue;
-
             } else if let Some(json_content) = extract_json_tool(&response_text) {
                 // Remove the entire <json>...</json> block, keep reasoning
                 let cleaned = if let Some(start) = response_text.find("<json>") {

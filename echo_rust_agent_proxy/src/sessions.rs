@@ -69,16 +69,19 @@ pub fn extract_session_command(response_text: &str) -> Option<(String, String)> 
     None
 }
     // Extract end command
+    /// Extracts an end session command in the format:
+/// <end_session name="session_name"/>
 pub fn extract_end_command(response_text: &str) -> Option<String> {
-    for line in response_text.lines() {
-        let line = line.trim();
-        if let Some(name) = line.strip_prefix("END_SESSION:") {
-            return Some(name.trim().to_string());
+    if let Some(start) = response_text.find("<end_session name=\"") {
+        let after = &response_text[start + 19..]; // length of `<end_session name="`
+
+        if let Some(name_end) = after.find('"') {
+            let session_name = after[..name_end].to_string();
+            return Some(session_name);
         }
     }
     None
 }
-
 pub async fn execute_in_session(
     _home_dir: PathBuf,
     _active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
@@ -217,7 +220,10 @@ pub async fn handle_session_command(
         }
     } else {
         // END_SESSION case
+       println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);
+
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
+
         let tool_content = format!("Session '{}' has been terminated.", session_name);
         agent.messages.push(json!({"role": "tool", "content": tool_content}));
     }
