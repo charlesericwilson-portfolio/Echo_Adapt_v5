@@ -58,14 +58,26 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
     - sudo apt install cargo
     - sudo apt install rustup
 ```
- 3. **Build and run the Rust version**
+ 3. Clone the repo
+ ```bash
+  git clone https://github.com/charlesericwilson-portfolio/Echo_agent_proxyv5/tree/main
+  cd Echo_agent_proxyv5
+```
+ 4. Edit the config file for your enpoints and system prompts stating system prompts are in echo_agent_proxy/main_system.txt and echo_agent_proxy/summarizer.txt
+  
+ 5. **Build or run Rust version**
 ```bash
   cd [build directory]
   cargo build --release
   ./target/release/echo_rust_wrapper
   ```
- 4. Edit the config.toml file with endpoints, deny commands, and system prompt paths.
-
+OR
+```bash
+  cd [build directory]
+  cargo run
+  ```
+ 6. Enjoy yourself and please provide feedback.
+ 
 ## Current Status (May 2026)
 
 - **Stable**: `<command></command>` raw text tool execution
@@ -94,7 +106,7 @@ The agent can fluidly switch between raw text commands, persistent tmux sessions
 - More built-in tools (web search, document generation, database queries, etc.)
 - Cleaner terminal UI
 - Better multi-model support (easy switching between local and cloud models)
-- 
+  
 ### What it does
 - Supports **hybrid raw-text tool calling** and Json:
   - `<command> command here </command>` for simple one-shot shell commands
