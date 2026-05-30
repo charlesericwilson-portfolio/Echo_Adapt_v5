@@ -1,5 +1,5 @@
 ## Feedback Welcome
-This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot.
+This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot. If you want to start at the begining click [here](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview) or for the model training [here](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 
 # Echo Tool System
 This is the active development version of the Echo project — a lightweight, local LLM agent tool system written in Rust.
@@ -69,13 +69,13 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
 ## Current Status (May 2026)
 
 - **Stable**: `<command></command>` raw text tool execution
-- **Functional**: Persistent `<session name = NAME></session>` tool execution via tmux with smart output capture
+- **Functional**: Persistent `<session name = NAME></session>` tool execution via tmux with smart output capture and tool output cleaning
 - **Stable** multi-line command and file writing support with xml tags <COMMAND>command here</COMMAND>. You can change the flag name in the code before compile right now but will eventually be going into config.toml
-- **New (In Progress)**: JSON tool calling support
+- **New (In Progress)**: JSON tool calling is functional I have left stubs in the code so you can define your own tools according to your needs.
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
-- Safety deny-list for dangerous commands
+- Safety deny-list for dangerous commands. You can add anything you want to block in the config.toml.
 - ShareGPT-style JSONL logging for training data
 
 The agent can fluidly switch between raw text commands, persistent tmux sessions, and structured JSON tool calls depending on what the model decides to use or you can simply instruct the model to use one or more of your choosing. 
@@ -86,12 +86,11 @@ The agent can fluidly switch between raw text commands, persistent tmux sessions
 - **Persistent Sessions**: Full tmux integration with named sessions and clean output capture
 - **Flexible Architecture**: Designed so users can add their own tools easily
 - **Local-First**: Works with local models (llama.cpp, Ollama, etc.)
-- **Extensible**: Planning full TOML config support for endpoints, system prompts, and tool definitions
+- **Extensible**: Includes full TOML config support for endpoints, system prompts, safety deny list, and tool definitions
 
 ## Roadmap
 
-- Complete JSON tool calling system
-- TOML config file for endpoints, system prompt, and tool definitions (no recompilation needed)
+- TOML config file for endpoints, system prompt, and tool definitions (no recompilation needed) still adding features to the TOML.
 - More built-in tools (web search, document generation, database queries, etc.)
 - Cleaner terminal UI
 - Better multi-model support (easy switching between local and cloud models)
@@ -101,6 +100,7 @@ The agent can fluidly switch between raw text commands, persistent tmux sessions
   - `<command> command here </command>` for simple one-shot shell commands
   - `<session name = NAME> command here </session>` for persistent tmux sessions (ideal for msfconsole, long-running shells, etc.)
   - `<json> <Open AI tool format> </json>`
+  - `<end_session name = NAME/>`
 - Automatic tmux session creation/reuse
 - Marker-based clean output capture (only returns new command output, not full session history)
 - Safety deny list (blocks dangerous commands before execution)
