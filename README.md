@@ -1,3 +1,32 @@
+```mermaid
+flowchart TD
+    A[User sends prompt] --> B[LLM / Echo]
+    B --> C[LLM generates reply]
+    C --> D[Tool Extractor checks for session:NAME or COMMAND:]
+   
+    D -->|Session command found| E[Session Manager]
+    E --> F[Auto-create or reuse tmux session]
+    F --> G[Send command to tmux session]
+    G --> H[Session Manager starts polling tmux pane]
+    H --> I[Wait for new output + markers]
+    I --> J[Capture only new output between markers]
+    J --> K[Update Database with clean output]
+    K --> L[Send tool result back to LLM as 'tool' message]
+   
+    D -->|No session command| M[Execute as normal COMMAND:]
+    M --> O[Save COMMAND result to Database]
+    O --> N[Send tool result back to LLM as 'tool' message]
+   
+    L --> B
+    N --> B
+   
+    style A fill:#4ade80,stroke:#166534
+    style B fill:#60a5fa,stroke:#1e40af
+    style E fill:#facc15,stroke:#854d0e
+    style K fill:#c084fc,stroke:#6b21a8
+    style O fill:#c084fc,stroke:#6b21a8
+```
+
 ## Feedback Welcome
 This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot. If you want to start at the begining click [here](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview) or for the model training [here](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 
@@ -129,37 +158,7 @@ This creates a fundamental semantic mismatch. The model was trained to treat use
 The Solution
 By extending the tokenizer config to recognize a native tool role as a first-class message type, the model receives tool output in a semantically distinct slot it was trained to understand as feedback from its own actions, not as a new request from a user. It knows the wrapper executed the command on its behalf. It knows the output is the result of something it initiated. And it knows when the task is done because the feedback confirms completion rather than prompting further action.
 
-
-
 Persistent sessions with complex tools (full msfconsole workflows) are still being tuned. Context management and summarizer behavior continue to be refined. Database integration for all tool calls for auditing complete. Now supports Json function calling.
 
-```mermaid
-flowchart TD
-    A[User sends prompt] --> B[LLM / Echo]
-    B --> C[LLM generates reply]
-    C --> D[Tool Extractor checks for session:NAME or COMMAND:]
-   
-    D -->|Session command found| E[Session Manager]
-    E --> F[Auto-create or reuse tmux session]
-    F --> G[Send command to tmux session]
-    G --> H[Session Manager starts polling tmux pane]
-    H --> I[Wait for new output + markers]
-    I --> J[Capture only new output between markers]
-    J --> K[Update Database with clean output]
-    K --> L[Send tool result back to LLM as 'tool' message]
-   
-    D -->|No session command| M[Execute as normal COMMAND:]
-    M --> O[Save COMMAND result to Database]
-    O --> N[Send tool result back to LLM as 'tool' message]
-   
-    L --> B
-    N --> B
-   
-    style A fill:#4ade80,stroke:#166534
-    style B fill:#60a5fa,stroke:#1e40af
-    style E fill:#facc15,stroke:#854d0e
-    style K fill:#c084fc,stroke:#6b21a8
-    style O fill:#c084fc,stroke:#6b21a8
-```
 Next steps: Building datasets and adding database support. Finetuning the base model check it out [Echo_training_project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 Developed with AI assistance from Grok(XAI)
