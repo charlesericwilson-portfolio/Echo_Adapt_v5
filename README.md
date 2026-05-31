@@ -162,3 +162,4 @@ flowchart TD
     style O fill:#c084fc,stroke:#6b21a8
 ```
 Next steps: Building datasets and adding database support. Finetuning the base model check it out [Echo_training_project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
+Developed with AI assistance from Grok(XAI)
