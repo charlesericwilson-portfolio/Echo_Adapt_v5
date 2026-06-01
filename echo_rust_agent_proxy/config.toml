@@ -6,8 +6,9 @@ max_tokens = 2048
 
 [summarizer]
 url = "http://localhost:8082/v1/chat/completions"
+model = "summarizer"
 
-[search]
+[web_search]
 url = "http://localhost:8081/search"
 
 [paths]
@@ -19,6 +20,13 @@ database = "echo_tools.db"
 main_system = "/home/eric/prompts/main_system.txt"
 summarizer = "/home/eric/prompts/summarizer.txt"
 
+[json_tools]
+enabled = [
+    "get_current_datetime",
+    "web_search",
+    "browse_page"
+]
+
 [context]
 summarize_threshold = 180000
 
@@ -26,10 +34,10 @@ summarize_threshold = 180000
 denylist = [
     "rm -rf",
     "rm -r /",
+    "$(echo rm) -rf /tmp",
     "> /dev/",
     "dd if=/dev/zero",
     "mkfs",
-    "format",
     "shred",
     "wipefs",
     "fdisk",
