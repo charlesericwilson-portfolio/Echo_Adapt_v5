@@ -89,7 +89,7 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
 ```
  3. Clone the repo
  ```bash
-  git clone https://github.com/charlesericwilson-portfolio/Echo_agent_proxyv5/tree/main
+  git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5/tree/main
   cd Echo_agent_proxyv5
 ```
  4. Edit the config file for your enpoints and system prompts stating system prompts are in echo_agent_proxy/main_system.txt and echo_agent_proxy/summarizer.txt
