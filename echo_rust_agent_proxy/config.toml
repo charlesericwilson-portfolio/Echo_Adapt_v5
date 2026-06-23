@@ -15,6 +15,7 @@ url = "http://localhost:8081/search"
 home_dir = ""
 context_file = "/home/eric/echo/Echo_rag/Echo-context.txt"
 database = "echo_tools.db"
+memory_file = "memory.md"
 
 [prompts]
 main_system = "/home/eric/prompts/main_system.txt"
@@ -24,7 +25,9 @@ summarizer = "/home/eric/prompts/summarizer.txt"
 enabled = [
     "get_current_datetime",
     "web_search",
-    "browse_page"
+    "browse_page",
+    "append_memory",
+    "read_memory"
 ]
 
 [context]

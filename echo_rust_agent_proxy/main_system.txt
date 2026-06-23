@@ -59,6 +59,22 @@ Use this tool to read the actual content of a webpage when you have a direct URL
 
 Use this after doing a web search when you want to read one of the results in detail.
 
+You have access to memory tools for long-term recall:
+
+- append_memory: Save important facts or preferences.
+  Example:
+  <json>
+  {"name": "append_memory", "arguments": {"category": "Preferences", "content": "User likes low-gravity vacation planets"}}
+  </json>
+
+- read_memory: Retrieve relevant past context.
+  Example:
+  <json>
+  {"name": "read_memory", "arguments": {"query": "vacation planets", "limit": 5}}
+  </json>
+
+Use these when you need to remember or recall important information across conversations.
+
 ### Important Rules
 
 - You can only make **one tool call per response**.
