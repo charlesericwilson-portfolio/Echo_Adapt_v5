@@ -17,6 +17,7 @@ mod sessions;
 mod json;
 mod summary;
 mod agent;
+mod memory;
 
 use agent::EchoAgent;
 

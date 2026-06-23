@@ -14,6 +14,7 @@ pub struct PathsConfig {
     pub home_dir: Option<String>,
     pub context_file: String,
     pub database: String,
+    pub memory_file:String,
 }
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
@@ -50,6 +51,7 @@ pub struct SecurityConfig {
 pub struct ContextConfig {
     pub summarize_threshold: usize,
 }
+
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
