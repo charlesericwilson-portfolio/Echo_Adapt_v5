@@ -121,6 +121,23 @@ OR
 
 The agent can fluidly switch between raw text commands, persistent tmux sessions, and structured JSON tool calls depending on what the model decides to use or you can simply instruct the model to use one or more of your choosing. 
 
+## Memory System
+Echo now has persistent cross-thread memory stored in memory.md.
+Features:
+
+Semantic retrieval — Pulls relevant past context using embeddings and cosine similarity
+Selective append — Only important facts, preferences, and events are saved
+Human readable — Easy to open and review the memory file
+Configurable — Memory file path set in config.toml
+
+Available Tools:
+
+append_memory(category, content) — Save new information
+read_memory(query, limit) — Retrieve relevant context
+
+The agent will automatically use memory when relevant and append new important details.
+This makes Echo much better at long-term recall and consistency across sessions.
+
 ## Features
 
 - **Hybrid Tool Calling**: Supports both simple command syntax and modern JSON function calling
