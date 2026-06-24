@@ -10,6 +10,12 @@ pub struct EndpointConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct EmbeddingsConfig {
+    pub url: String,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PathsConfig {
     pub home_dir: Option<String>,
     pub context_file: String,
@@ -64,6 +70,7 @@ pub struct Config {
     pub web_search: Option<WebSearchConfig>,
     #[serde(default)]
     pub json_tools: JsonToolsConfig,
+    pub embeddings: EmbeddingsConfig,
 }
 
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
