@@ -116,6 +116,7 @@ OR
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
+- Cross thread sematic search functions.
 - Safety deny-list for dangerous commands. You can add anything you want to block in the config.toml.
 - ShareGPT-style JSONL logging for training data
 
