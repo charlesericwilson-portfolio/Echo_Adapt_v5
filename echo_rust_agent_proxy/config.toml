@@ -8,6 +8,10 @@ max_tokens = 2048
 url = "http://localhost:8082/v1/chat/completions"
 model = "summarizer"
 
+[embeddings]
+url = "http://localhost:8080/v1/chat/completions"  # or same as main if using chat for embeddings
+model = "Echo"  # or a dedicated embedding model
+
 [web_search]
 url = "http://localhost:8081/search"
 
