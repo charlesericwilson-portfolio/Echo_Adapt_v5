@@ -28,13 +28,15 @@ impl Memory {
         Self { main_file }
     }
 
-    /// Append important information to memory
-    pub async fn append(&self, category: &str, content: &str) -> Result<()> {
+    /// Append important information + pre-computed embedding
+    pub async fn append(&self, category: &str, content: &str, agent: &EchoAgent) -> Result<()> {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let embedding = self.get_embedding(content, agent).await?;
+        let embedding_str = embedding.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",");
 
         let entry = format!(
-            "\n## {} [{}]\n{}\n",
-            category, timestamp, content.trim()
+            "\n## {} [{}]\n{}\n\n[EMBEDDING: {}]\n",
+            category, timestamp, content.trim(), embedding_str
         );
 
         let mut file_content = if self.main_file.exists() {
@@ -49,39 +51,69 @@ impl Memory {
         Ok(())
     }
 
-    /// Get embedding for a text using the main model
+    /// Get embedding - supports both chat and dedicated embeddings endpoint
     pub async fn get_embedding(&self, text: &str, agent: &EchoAgent) -> Result<Vec<f32>> {
-        let prompt = format!("Generate a dense embedding vector for the following text. Output only the vector as comma-separated numbers: {}", text);
+        let is_chat_endpoint = agent.config.embeddings.url.contains("/chat/completions");
 
-        let payload = serde_json::json!({
-            "model": &agent.config.endpoint.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 512,
-            "temperature": 0.0
-        });
+        if is_chat_endpoint {
+            let system_prompt = "You are an embedding generator. Your only job is to convert text into a dense vector. Output ONLY a comma-separated list of floating point numbers. No explanation, no other text.";
 
-        let response = reqwest::Client::new()
-            .post(&agent.config.endpoint.url)
-            .json(&payload)
-            .send()
-            .await?
-            .json::<Value>()
-            .await?;
+            let payload = serde_json::json!({
+                "model": &agent.config.embeddings.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                "max_tokens": 1024,
+                "temperature": 0.0
+            });
 
-        let embedding_text = response["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim();
+            let response = reqwest::Client::new()
+                .post(&agent.config.embeddings.url)
+                .json(&payload)
+                .send()
+                .await?
+                .json::<Value>()
+                .await?;
 
-        let embedding: Vec<f32> = embedding_text
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
+            let embedding_text = response["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("")
+                .trim();
 
-        Ok(embedding)
+            let embedding: Vec<f32> = embedding_text
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+
+            Ok(embedding)
+        } else {
+            // Dedicated embeddings endpoint
+            let payload = serde_json::json!({
+                "input": text,
+                "model": &agent.config.embeddings.model,
+            });
+
+            let response = reqwest::Client::new()
+                .post(&agent.config.embeddings.url)
+                .json(&payload)
+                .send()
+                .await?
+                .json::<Value>()
+                .await?;
+
+            let embedding = response["data"][0]["embedding"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("No embedding in response"))?
+                .iter()
+                .filter_map(|v| v.as_f64().map(|f| f as f32))
+                .collect();
+
+            Ok(embedding)
+        }
     }
 
-    /// Semantic read - finds relevant context
+    /// Fast semantic read using pre-stored embeddings
     pub async fn read_relevant(&self, query: &str, limit: usize, agent: &EchoAgent) -> Result<String> {
         if !self.main_file.exists() {
             return Ok("No memory entries yet.".to_string());
@@ -95,21 +127,51 @@ impl Memory {
 
         let query_embedding = self.get_embedding(query, agent).await?;
 
-        // Score lines by similarity to query
-        let mut scored: Vec<(&str, f32)> = Vec::new();
+        let mut scored: Vec<(String, f32)> = Vec::new();  // Use owned String to avoid borrow issues
 
-        for line in content.lines() {
-            if line.trim().is_empty() {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let line = lines[i];
+            if line.trim().is_empty() || !line.starts_with("## ") {
+                i += 1;
                 continue;
             }
-            let line_embedding = self.get_embedding(line, agent).await?;
-            let score = cosine_similarity(&query_embedding, &line_embedding);
-            scored.push((line, score));
+
+            // Collect text until we hit the embedding
+            let mut entry_text = String::new();
+            let mut embedding: Option<Vec<f32>> = None;
+
+            entry_text.push_str(line);
+            entry_text.push('\n');
+            i += 1;
+
+            while i < lines.len() {
+                let l = lines[i];
+                if l.starts_with("[EMBEDDING: ") {
+                    if let Some(embed_str) = l.strip_prefix("[EMBEDDING: ").and_then(|s| s.strip_suffix(']')) {
+                        embedding = Some(embed_str.split(',').filter_map(|s| s.trim().parse().ok()).collect());
+                    }
+                    i += 1;
+                    break;
+                } else if l.starts_with("## ") {
+                    break; // new entry started
+                } else {
+                    entry_text.push_str(l);
+                    entry_text.push('\n');
+                }
+                i += 1;
+            }
+
+            if let Some(embed) = embedding {
+                let score = cosine_similarity(&query_embedding, &embed);
+                scored.push((entry_text.trim().to_string(), score));
+            }
         }
 
-        // Sort by score and take top results
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        let relevant: Vec<&str> = scored.into_iter().take(limit).map(|(line, _)| line).collect();
+        let relevant: Vec<String> = scored.into_iter().take(limit).map(|(text, _)| text).collect();
 
         if relevant.is_empty() {
             Ok("No relevant memory found.".to_string())
