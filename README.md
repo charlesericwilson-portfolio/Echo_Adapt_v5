@@ -90,9 +90,9 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
  3. Clone the repo
  ```bash
   git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5/tree/main
-  cd Echo_agent_proxyv5
+  cd Echo_Adapt_v5/echo_rust_agent_proxy
 ```
- 4. Edit the config file for your enpoints and system prompts stating system prompts are in echo_agent_proxy/main_system.txt and echo_agent_proxy/summarizer.txt
+ 4. Edit the config file for your enpoints and system prompts starting system prompts are in echo_rust_agent_proxy/main_system.txt and echo_rust_agent_proxy/summarizer.txt
   
  5. **Build or run Rust version**
 ```bash
@@ -100,7 +100,7 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
   cargo build --release
   ./target/release/echo_rust_wrapper
   ```
-OR
+OR Test first
 ```bash
   cd [build directory]
   cargo run
@@ -113,11 +113,11 @@ OR
 - **Functional**: Persistent `<session name = NAME></session>` tool execution via tmux with smart output capture and tool output cleaning
 - **Stable** multi-line command and file writing support with xml tags <command>command here</command>. You can change the flag name in the code before compile right now but will eventually be going into config.toml
 - **JSON function calling** is functional I have included a web search tool and a browse page tool to read the results and you can define your own tools according to your needs.
+- **Semantic search cross thread memory** memory functions append_memory to save memories and embeddings and read_memory to do a semantic search only pulling relevant data into context.
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
-- Cross thread sematic search functions.
-- Safety deny-list for dangerous commands. You can add anything you want to block in the config.toml.
+- Safety deny-list for dangerous commands as well as obsfication and at the token level. You can add anything you want to block in the config.toml.
 - ShareGPT-style JSONL logging for training data
 
 The agent can fluidly switch between raw text commands, persistent tmux sessions, and structured JSON tool calls depending on what the model decides to use or you can simply instruct the model to use one or more of your choosing. 
@@ -125,7 +125,6 @@ The agent can fluidly switch between raw text commands, persistent tmux sessions
 ## Memory System
 Echo now has persistent cross-thread memory stored in memory.md.
 Features:
-
 Semantic retrieval — Pulls relevant past context using embeddings and cosine similarity
 Selective append — Only important facts, preferences, and events are saved
 Human readable — Easy to open and review the memory file
@@ -149,7 +148,7 @@ This makes Echo much better at long-term recall and consistency across sessions.
 
 ## Roadmap
 
-- TOML config file for endpoints, system prompt, and tool definitions (no recompilation needed) still adding features to the TOML.
+- TOML config file for endpoints, system prompt, and allowed tools, still adding features to the TOML.
 - Cleaner terminal UI
 - Better multi-model support (easy switching between local and cloud models)
   
@@ -160,7 +159,7 @@ This makes Echo much better at long-term recall and consistency across sessions.
   - `<json> <Open AI tool format> </json>`
   - `<end_session name = NAME/>`
 - Automatic tmux session creation/reuse
-- Marker-based clean output capture (only returns new command output, not full session history)
+- Marker- time based clean output capture (only returns new command output, not full session history)
 - Safety deny list (blocks dangerous commands before execution)
 - JSONL logging in ShareGPT format (already capturing training examples of when/why to use SESSION vs COMMAND)
 - Fast blocking HTTP client talking to your local llama.cpp servers
