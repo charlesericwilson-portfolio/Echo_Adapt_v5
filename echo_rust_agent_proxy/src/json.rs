@@ -75,7 +75,7 @@ pub async fn handle_memory_tool(
         "append_memory" => {
             let category = arguments["category"].as_str().unwrap_or("General");
             let content = arguments["content"].as_str().unwrap_or("");
-            memory.append(category, content).await?;
+            memory.append(category, content, agent).await?;
             Ok("Memory updated successfully.".to_string())
         }
 
