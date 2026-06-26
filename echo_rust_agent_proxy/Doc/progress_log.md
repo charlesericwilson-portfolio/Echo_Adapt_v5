@@ -21,7 +21,7 @@ We kept the proven parts (tmux session management, marker-based output capture, 
 - Started with the clean v3 `sessions.rs` as base
 - Ported the main chat loop and reqwest client from earlier Rust COMMAND version
 - Added modular structure (`main.rs` as orchestrator, `sessions.rs`, `commands.rs`, `log.rs`, `safety.rs`)
-- Re-integrated the safety deny list (15-item list, checked before every execution)
+- Re-integrated the safety deny list (15-item list, checked before every execution as well as obsfication detection at the token level)
 - Fixed compilation issues from splitting the monolithic file (unused code, Result generics, imports)
 
 **Day 2 – Summarizer Integration**
@@ -37,17 +37,17 @@ We kept the proven parts (tmux session management, marker-based output capture, 
 - Added proper error messages when deny list blocks a command
 
 **Added Recently**
-- Sqlite database support for tool logging and better output capture.
+- Semantic search with memory append and read tools as well as memory.md file with embeddings.
 - Added an inner loop to main.rs to allow autonomously chaining tool calls across turns.
-- Added Json function calling support only one tool right now but you can define your tools as needed. But the framework supports all three methods.
+- Added Json function calling support only web search, browse page, append memory, read memory right now but you can define your tools as needed. But the framework supports all three methods.
 - Swapped to a config.toml for endpoints and system prompts will eventually hold json tool definitions as well so no need to recompile to swap enpoints or system prompts.
 
 ### Current Capabilities (v5)
-- **COMMAND:** method – Stable, one-shot commands, no summarizer
+- **<command></command>** method – Stable, one-shot commands, no summarizer
 
 [Command](https://github.com/charlesericwilson-portfolio/Echo_rust_agent_proxyv5/blob/main/echo_rust_agent_proxy/screenshots/sommand_ls_-la.png)
 
-- **SESSION:NAME** method – Works for persistent tmux sessions (bash, ifconfig, basic msfconsole)
+- **<session name=NAME></session>** method – Works for persistent tmux sessions (bash, ifconfig, basic msfconsole)
 
 [Session](https://github.com/charlesericwilson-portfolio/Echo_rust_agent_proxyv5/blob/main/echo_rust_agent_proxy/screenshots/ifconfig.png)
 
@@ -80,7 +80,7 @@ We kept the proven parts (tmux session management, marker-based output capture, 
 
 ### Next Planned Steps
 - Further refine summarizer prompt and context stripping
-- Collect more targeted training examples (SESSION vs COMMAND decision making)
+- Collect more targeted training examples
 - Switch code around to accept settings from a config.toml for tool definitions, API URL, system prompt, summarizer on off setting, and more.
 
 **Overall Assessment:**  
