@@ -2,7 +2,18 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use anyhow::Result;
-use serde_json::json;
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct Message {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct LogEntry {
+    messages: Vec<Message>,
+}
 
 pub async fn save_chat_log_entry(
     log_dir: &PathBuf,
@@ -17,10 +28,10 @@ pub async fn save_chat_log_entry(
     let mut messages = Vec::new();
 
     if !user_message.is_empty() {
-        messages.push(json!({
-            "role": "user",
-            "content": user_message.trim()
-        }));
+        messages.push(Message {
+            role: "user".to_string(),
+            content: user_message.trim().to_string(),
+        });
     }
 
     if !assistant_response.is_empty() {
@@ -34,13 +45,16 @@ pub async fn save_chat_log_entry(
             assistant_response.trim().to_string()
         };
 
-        messages.push(json!({
-            "role": "assistant",
-            "content": content
-        }));
+        messages.push(Message {
+            role: "assistant".to_string(),
+            content,
+        });
     }
 
-    let log_line = json!({ "messages": messages }).to_string();
+    let log_entry = LogEntry { messages };
+
+    let log_line = serde_json::to_string(&log_entry)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize log: {}", e))?;
 
     let mut file = OpenOptions::new()
         .append(true)
