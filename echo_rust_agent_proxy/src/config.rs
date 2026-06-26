@@ -36,8 +36,9 @@ pub struct JsonToolsConfig {
     pub enabled: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SummarizerConfig {
+    pub enabled: bool,
     pub url: String,
     pub model: String,
 }
