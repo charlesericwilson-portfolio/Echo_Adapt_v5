@@ -3,6 +3,14 @@ use anyhow::Result;
 use crate::config::Config;
 
 pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<String> {
+    if !config.summarizer.enabled {
+        println!("{}Echo: [SUMMARIZER] Disabled in config — skipping{}",
+                 crate::agent::YELLOW, crate::agent::RESET_COLOR);
+        return Ok(raw_output.to_string());   // return original
+    }
+
+    println!("{}Echo: [SUMMARIZER] Summarizing tool output...{}",
+             crate::agent::YELLOW, crate::agent::RESET_COLOR);
     let tool_summarizer_prompt = tokio::fs::read_to_string(&config.prompts.summarizer)
         .await
         .expect("Failed to read summarizer prompt");
