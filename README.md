@@ -32,7 +32,7 @@ This project is still evolving. If you clone it, try it, or have ideas on how to
 
 # Echo Adapt Tool Proxy System
 This is the active development version of the Echo agent project — a lightweight, local LLM agent tool system written in Rust. I use a [Qwen 2.5 Coder 14B Instruct](https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct) that has been trained using [QLoRA](https://github.com/charlesericwilson-portfolio/Echo_training_project) as a merged base.
-It is a continuation of the earlier [Echo Adapt_v3](https://github.com/charlesericwilson-portfolio/Echo_Adapt_v3) and adds support for proxy-style tool calls, output summarization, and database logging.
+It is a continuation of the earlier [Echo Adapt_v3](https://github.com/charlesericwilson-portfolio/Echo_Adapt_v3) and adds support for proxy-style tool calls, opt in opt out output summarization, and database logging.
 Key idea: If your model can already tell you what commands to type and doesn't use a jinja template, it can use tools through this framework. No special fine-tuning is required.
 
 The raw text methods are ready to use out of the box.
@@ -107,7 +107,7 @@ OR Test first
   ```
  6. Enjoy yourself and please provide feedback.
  
-## Current Status (May 2026)
+## Current Status (June 2026)
 
 - **Stable**: `<command></command>` raw text tool execution
 - **Functional**: Persistent `<session name = NAME></session>` tool execution via tmux with smart output capture and tool output cleaning
@@ -117,6 +117,7 @@ OR Test first
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
+- Config driven opt in opt out for tool summaries.
 - Safety deny-list for dangerous commands as well as obsfication and at the token level. You can add anything you want to block in the config.toml.
 - ShareGPT-style JSONL logging for training data
 
