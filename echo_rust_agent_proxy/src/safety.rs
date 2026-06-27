@@ -64,7 +64,7 @@ pub fn is_command_safe(command: &str, config: &Config) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::config::{Config, SecurityConfig, EndpointConfig, SummarizerConfig,
-                        PromptsConfig, ContextConfig, PathsConfig};
+                        PromptsConfig, ContextConfig, PathsConfig, EmbeddingsConfig};
 
     fn test_config() -> Config {
         Config {
@@ -75,6 +75,7 @@ mod tests {
                 max_tokens: 2048,
             },
             summarizer: SummarizerConfig {
+                enabled: true,
                 url: "http://localhost".to_string(),
                 model: "summarizer".to_string(),
             },
@@ -98,6 +99,11 @@ mod tests {
                 home_dir: None,
                 context_file: "test.txt".to_string(),
                 database: "test.db".to_string(),
+                memory_file: "memory.md".to_string(),
+            },
+            embeddings: EmbeddingsConfig {
+                url: "http://localhost".to_string(),
+                model: "test".to_string(),
             },
             web_search: None,
             json_tools: crate::config::JsonToolsConfig::default(),

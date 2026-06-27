@@ -18,13 +18,13 @@ url = "http://localhost:8081/search"
 
 [paths]
 home_dir = ""
-context_file = "/home/eric/echo/Echo_rag/Echo-context.txt"
+context_file = "Echo-context.txt"
 database = "echo_tools.db"
 memory_file = "memory.md"
 
 [prompts]
-main_system = "/home/eric/prompts/main_system.txt"
-summarizer = "/home/eric/prompts/summarizer.txt"
+main_system = "main_system.txt"
+summarizer = "summarizer.txt"
 
 [json_tools]
 enabled = [

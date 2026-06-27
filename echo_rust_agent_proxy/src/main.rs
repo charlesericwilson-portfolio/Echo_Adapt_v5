@@ -23,7 +23,7 @@ use agent::EchoAgent;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Echo Rust Agent v2 – Starting...\n");
+    println!("Echo Rust Agent v5 – Starting...\n");
 
     // Load configuration from config.toml
     // This includes endpoint URL, model name, prompts, paths, etc.

@@ -53,18 +53,7 @@ pub const RESET_COLOR: &str = "\x1b[0m";
 pub struct EchoAgent {
     pub config: Config,
     pub messages: Vec<Value>,
-    pub db: ToolDatabase,/// Intentionally a no-op by design.
-///
-/// Tmux sessions are kept alive after the chat ends so that:
-/// - Active shells, listeners, or tools persist across crashes/restarts
-/// - The agent can resume a previous engagement by reviewing the tool
-///   database (echo_tools.db) and reconnecting to existing sessions
-///
-/// Sessions are auto-reaped by the background cleanup task after 1 hour
-/// of inactivity (see `start_session_cleanup_task`).
-///
-/// To kill all sessions on exit instead, iterate `active_sessions` here
-/// and call `tmux kill-session -t <name>` for each.
+    pub db: ToolDatabase,
     pub home_dir: PathBuf,
     pub active_sessions: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
