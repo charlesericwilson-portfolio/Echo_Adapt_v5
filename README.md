@@ -1,6 +1,6 @@
 ```mermaid
 flowchart TD
-    A[User sends prompt] --> B[LLM / Echo]
+    A[User sends prompt] --> B[LLM / Grok]
     B --> C[LLM generates reply]
     C --> D[Tool Extractor checks for session:NAME or COMMAND:]
    
