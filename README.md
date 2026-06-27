@@ -84,8 +84,9 @@ Get your xAI API key from console.x.ai
 ```
  3. Clone the repo
  ```bash
-  git clone https://github.com/charlesericwilson-portfolio/Grok_Adapt_v5
-  cd Grok_Adapt_v5
+  git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5
+  cd Echo_Adapt_v5
+  git checkout Grok_Adapt_v5
 ```
  4. Edit the config file for your enpoints and system prompts starting system prompts are in echo_rust_agent_proxy/main_system.txt and echo_rust_agent_proxy/summarizer.txt
   
