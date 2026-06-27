@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 use anyhow::Result;
-use crate::config::Config;
+use std::path::Path;
+use crate::config::{Config, resolve_path};
 
-pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<String> {
+pub async fn summarize_output(raw_output: &str, config: &Config, base_dir: &Path) -> Result<String> {
     if !config.summarizer.enabled {
         println!("{}Echo: [SUMMARIZER] Disabled in config — skipping{}",
                  crate::agent::YELLOW, crate::agent::RESET_COLOR);
@@ -11,7 +12,8 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
 
     println!("{}Echo: [SUMMARIZER] Summarizing tool output...{}",
              crate::agent::YELLOW, crate::agent::RESET_COLOR);
-    let tool_summarizer_prompt = tokio::fs::read_to_string(&config.prompts.summarizer)
+    let summarizer_path = resolve_path(base_dir, &config.prompts.summarizer);
+    let tool_summarizer_prompt = tokio::fs::read_to_string(&summarizer_path)
         .await
         .expect("Failed to read summarizer prompt");
 

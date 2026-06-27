@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct EndpointConfig {
@@ -78,4 +79,14 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(path)?;
     let config: Config = toml::from_str(&content)?;
     Ok(config)
+}
+
+/// Resolve a configured path: absolute paths pass through, relative paths join `base`.
+pub fn resolve_path(base: &Path, configured: &str) -> PathBuf {
+    let path = Path::new(configured);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    }
 }

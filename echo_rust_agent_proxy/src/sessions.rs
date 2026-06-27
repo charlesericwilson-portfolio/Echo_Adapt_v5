@@ -4,18 +4,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
-use serde_json::json;
 use std::time::Instant;
 
 use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
 
-    // starts or reuses and existing session
+    // starts or reuses an existing session (command execution happens in execute_in_session)
 pub async fn start_or_reuse_session(
     home_dir: PathBuf,
     active_sessions: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
     name: &str,
-    command: &str,
 ) -> Result<()> {
     let mut sessions = active_sessions.lock().await;
     sessions.insert(name.to_string(), (String::new(), Instant::now()));
@@ -36,11 +34,6 @@ pub async fn start_or_reuse_session(
     } else {
         println!("Reusing existing tmux session: {}", name);
     }
-
-    // Send the command
-    Command::new("tmux")
-        .args(["send-keys", "-t", name, command, "Enter"])
-        .status().await?;
 
     Ok(())
 }
@@ -211,13 +204,13 @@ pub async fn handle_session_command(
     if let Some(cmd) = command {
         if let Err(e) = is_command_safe(cmd, &agent.config) {
             println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
-            agent.messages.push(json!({"role": "assistant", "content": format!("Safety block: {}", e)}));
+            agent.push_tool_result(format!("Safety block: {}", e));
         } else {
-            start_or_reuse_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd).await?;
+            start_or_reuse_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await?;
 
             let raw_output = execute_in_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd.to_string()).await?;
 
-            let summary = match summarize_output(&raw_output, &agent.config).await {
+            let summary = match summarize_output(&raw_output, &agent.config, &agent.base_dir).await {
                 Ok(s) => s,
                 Err(e) => format!("(Summarizer failed: {})", e),
             };
@@ -225,9 +218,8 @@ pub async fn handle_session_command(
             agent.db.log_tool_call(session_name, cmd, &summary)?;
 
             let tool_content = format!("Tool output from SESSION '{}':\n{}", session_name, summary);
-                println!("{}[Tool Summary]:\n{}{}", crate::agent::YELLOW, summary, crate::agent::RESET_COLOR);
-                agent.messages.push(json!({"role": "assistant", "content": format!("Executed in session '{}'", session_name)}));
-                agent.messages.push(json!({"role": "tool", "content": tool_content}));
+            println!("{}[Tool Summary]:\n{}{}", crate::agent::YELLOW, summary, crate::agent::RESET_COLOR);
+            agent.push_tool_result(tool_content);
         }
     } else {
         // END_SESSION case
@@ -236,7 +228,7 @@ pub async fn handle_session_command(
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
 
         let tool_content = format!("Session '{}' has been terminated.", session_name);
-        agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.push_tool_result(tool_content);
     }
 
     Ok(())

@@ -5,7 +5,6 @@ use crate::log::save_chat_log_entry;
 use scraper::{Html, Selector};
 use std::time::Duration;
 use crate::memory::Memory;
-use std::path::PathBuf;
 
 pub async fn handle_json_tool_call_str(tool_call: &str, _web_search_url: Option<&str>, enabled_tools: &[String],) -> Result<String> {
     let parsed: Value = serde_json::from_str(tool_call)
@@ -69,7 +68,7 @@ pub async fn handle_memory_tool(
     tool_name: &str,
     arguments: &Value,
 ) -> Result<String> {
-    let memory = Memory::new(PathBuf::from(&agent.config.paths.memory_file));
+    let memory = Memory::new(agent.memory_path.clone());
 
     match tool_name {
         "append_memory" => {
@@ -117,11 +116,10 @@ pub async fn handle_json_tool(
                 Ok(result) => {
                     let tool_content = format!("Tool output:\n{}", result);
                     save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+                    agent.push_tool_result(tool_content);
                 }
                 Err(e) => {
-                    let error_msg = format!("Memory Tool error: {}", e);
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+                    agent.push_tool_result(format!("Memory Tool error: {}", e));
                 }
             }
             return Ok(());
@@ -144,11 +142,10 @@ pub async fn handle_json_tool(
 
             let tool_content = format!("Tool output:\n{}", result);
             save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-            agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+            agent.push_tool_result(tool_content);
         }
         Err(e) => {
-            let error_msg = format!("JSON Tool error: {}", e);
-            agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+            agent.push_tool_result(format!("JSON Tool error: {}", e));
         }
     }
 

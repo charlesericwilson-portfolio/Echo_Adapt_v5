@@ -28,7 +28,7 @@ use dirs_next as dirs;
 use std::sync::atomic::Ordering;
 
 use crate::sessions::start_session_cleanup_task;
-use crate::config::Config;
+use crate::config::{Config, resolve_path};
 use crate::db::ToolDatabase;
 use crate::summary::summarize_context;
 use crate::sessions::{extract_session_command, extract_end_command, clean_up_sessions};
@@ -55,11 +55,17 @@ pub struct EchoAgent {
     pub messages: Vec<Value>,
     pub db: ToolDatabase,
     pub home_dir: PathBuf,
+    pub base_dir: PathBuf,
+    pub memory_path: PathBuf,
     pub active_sessions: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl EchoAgent {
+    pub fn push_tool_result(&mut self, content: impl Into<String>) {
+        self.messages.push(json!({"role": "tool", "content": content.into()}));
+    }
+
     /// Create a new EchoAgent.
     ///
     /// This does several important things:
@@ -73,17 +79,12 @@ impl EchoAgent {
             _ => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/home/user/Documents")),
         };
 
-        let context_path = if config.paths.context_file.starts_with('/') {
-            PathBuf::from(&config.paths.context_file)
-        } else {
-            home_dir.join(&config.paths.context_file)
-        };
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| home_dir.clone());
 
-        let db_path = if config.paths.database.starts_with('/') {
-            PathBuf::from(&config.paths.database)
-        } else {
-            home_dir.join(&config.paths.database)
-        };
+        let context_path = resolve_path(&base_dir, &config.paths.context_file);
+        let db_path = resolve_path(&base_dir, &config.paths.database);
+        let memory_path = resolve_path(&base_dir, &config.paths.memory_file);
+        let main_prompt_path = resolve_path(&base_dir, &config.prompts.main_system);
 
         let db = ToolDatabase::new(db_path)?;
 
@@ -97,7 +98,7 @@ impl EchoAgent {
             println!("⚠️ Context file not found at: {}", context_path.display());
         }
 
-        let main_prompt = tokio::fs::read_to_string(&config.prompts.main_system)
+        let main_prompt = tokio::fs::read_to_string(&main_prompt_path)
             .await
             .expect("Failed to read main system prompt");
 
@@ -112,6 +113,8 @@ impl EchoAgent {
             messages,
             db,
             home_dir,
+            base_dir,
+            memory_path,
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };

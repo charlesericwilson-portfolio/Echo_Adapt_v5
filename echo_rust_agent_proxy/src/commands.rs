@@ -1,6 +1,5 @@
 // commands.rs
 use anyhow::Result;
-use serde_json::json;
 use crate::safety::is_command_safe;
 
 /// Extracts a command from either:
@@ -26,7 +25,7 @@ pub async fn handle_command(
 
     if let Err(e) = is_command_safe(command, &agent.config) {
         println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
-        agent.messages.push(json!({"role": "assistant", "content": format!("Safety block: {}", e)}));
+        agent.push_tool_result(format!("Safety block: {}", e));
         return Ok(());
     }
 
@@ -44,8 +43,7 @@ pub async fn handle_command(
             command.trim(), stdout, stderr
         );
 
-        // Replace the COMMAND: line with neutral text so it doesn't trigger again
-              agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.push_tool_result(tool_content);
 
     Ok(())
 }
