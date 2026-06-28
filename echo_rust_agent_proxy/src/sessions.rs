@@ -82,6 +82,7 @@ pub fn extract_end_command(response_text: &str) -> Option<String> {
     }
     None
 }
+
 pub async fn execute_in_session(
     _home_dir: PathBuf,
     _active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
@@ -92,48 +93,52 @@ pub async fn execute_in_session(
     let marker_start = format!("===ECHO_START_{}===", timestamp);
     let marker_end = format!("===ECHO_END_{}===", timestamp);
 
-    // Send start marker
+    // Send the three lines
     Command::new("tmux")
         .args(["send-keys", "-t", name, &format!("echo '{}'", marker_start), "Enter"])
         .status().await?;
 
-    // Send the actual command
+    // Small delay to let the start marker settle
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
     Command::new("tmux")
         .args(["send-keys", "-t", name, &command, "Enter"])
         .status().await?;
 
-    // Send end marker
+     // Small delay to give the command time to run and produce output
+    tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+
     Command::new("tmux")
         .args(["send-keys", "-t", name, &format!("echo '{}'", marker_end), "Enter"])
         .status().await?;
 
-    // Active polling loop (~300ms)
+    println!("{}[Session] Waiting for command to finish...{}", crate::agent::YELLOW, crate::agent::RESET_COLOR);
+
     let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(60);
+    let timeout = std::time::Duration::from_secs(90);
 
     loop {
         if start_time.elapsed() > timeout {
-            return Err(anyhow::anyhow!("Timeout waiting for command output in session '{}'", name));
+            return Err(anyhow::anyhow!("Timeout waiting for markers in session {}", name));
         }
 
-        // Capture current pane output
+        // Capture the entire pane output (no history tricks)
         let output = Command::new("tmux")
-            .args(["capture-pane", "-p", "-S", "-10000", "-t", name])
+            .args(["capture-pane", "-p", "-S", "-", "-t", name])  // -S - = everything in current pane
             .output().await?;
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
 
-        // Check if we have both markers and end is after start
+        // Find the latest markers
         if let (Some(start_idx), Some(end_idx)) = (raw.rfind(&marker_start), raw.rfind(&marker_end)) {
             if end_idx > start_idx {
-                let clean_output = raw[start_idx + marker_start.len()..end_idx]
-                    .trim()
-                    .to_string();
-                return Ok(clean_output);
+                let captured = raw[start_idx + marker_start.len()..end_idx].trim().to_string();
+                if !captured.is_empty() || captured.contains('\n') {
+                    return Ok(captured);
+                }
             }
         }
 
-        // Poll again in ~300ms
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     }
 }
@@ -205,36 +210,48 @@ pub async fn handle_session_command(
     command: Option<&str>,
 ) -> Result<()> {
     if let Some(cmd) = command {
-    println!("{}Echo: Executing in SESSION '{}' → {}{}",
-        crate::agent::YELLOW, session_name, cmd, crate::agent::RESET_COLOR);
-    }
-    if let Some(cmd) = command {
+        // println!("{}Echo: Executing in SESSION '{}' → {}{}",
+            crate::agent::YELLOW, session_name, cmd, crate::agent::RESET_COLOR);
+
         if let Err(e) = is_command_safe(cmd, &agent.config) {
             println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
             agent.messages.push(json!({"role": "assistant", "content": format!("Safety block: {}", e)}));
-        } else {
-            start_or_reuse_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd).await?;
-
-            let raw_output = execute_in_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd.to_string()).await?;
-
-            let summary = match summarize_output(&raw_output, &agent.config).await {
-                Ok(s) => s,
-                Err(e) => format!("(Summarizer failed: {})", e),
-            };
-
-            agent.db.log_tool_call(session_name, cmd, &summary)?;
-
-            let tool_content = format!("Tool output from SESSION '{}':\n{}", session_name, summary);
-                println!("{}[Tool Summary]:\n{}{}", crate::agent::YELLOW, summary, crate::agent::RESET_COLOR);
-                agent.messages.push(json!({"role": "assistant", "content": format!("Executed in session '{}'", session_name)}));
-                agent.messages.push(json!({"role": "tool", "content": tool_content}));
+            return Ok(());
         }
+
+        start_or_reuse_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd).await?;
+
+        let raw_output = execute_in_session(
+            agent.home_dir.clone(),
+            &agent.active_sessions,
+            session_name,
+            cmd.to_string()
+        ).await?;
+
+        // Summarize ONLY after we have the full output
+        let summary = match summarize_output(&raw_output, &agent.config).await {
+            Ok(s) => s,
+            Err(e) => format!("(Summarizer failed: {})", e),
+        };
+
+        agent.db.log_tool_call(session_name, cmd, &summary)?;
+
+        let tool_content = format!(
+            "Tool output from SESSION '{}':\nRaw summary: {}",
+            session_name, summary
+        );
+
+        // Do NOT print raw_output here — let the model summarize nicely
+        println!("{}[Session tool executed — Echo will summarize]{}",
+                 crate::agent::YELLOW, crate::agent::RESET_COLOR);
+
+        agent.messages.push(json!({"role": "assistant", "content": format!("Executed command in session '{}'", session_name)}));
+        agent.messages.push(json!({"role": "tool", "content": tool_content}));
+
     } else {
         // END_SESSION case
-       println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);
-
+        println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
-
         let tool_content = format!("Session '{}' has been terminated.", session_name);
         agent.messages.push(json!({"role": "tool", "content": tool_content}));
     }
