@@ -30,7 +30,7 @@ flowchart TD
 ## Feedback Welcome
 This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot. If you want to start at the begining click [here](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview) or for the model training [here](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 
-**If you want to use it with Grok API check out the Grok Adapt branch and working on combining it all in the future.**
+## **If you want to use it with Grok API check out the Grok Adapt branch and working on combining it all in the future.**
 
 # Adapt Tool Proxy System
 This is the active development version of the Echo agent project — a lightweight, local LLM agent tool system written in Rust. I use a [Qwen 2.5 Coder 14B Instruct](https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct) that has been trained using [QLoRA](https://github.com/charlesericwilson-portfolio/Echo_training_project) as a merged base.
