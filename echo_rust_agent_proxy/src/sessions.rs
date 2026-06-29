@@ -211,7 +211,7 @@ pub async fn handle_session_command(
 ) -> Result<()> {
     if let Some(cmd) = command {
         // println!("{}Echo: Executing in SESSION '{}' → {}{}",
-            crate::agent::YELLOW, session_name, cmd, crate::agent::RESET_COLOR);
+           // crate::agent::YELLOW, session_name, cmd, crate::agent::RESET_COLOR);
 
         if let Err(e) = is_command_safe(cmd, &agent.config) {
             println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
