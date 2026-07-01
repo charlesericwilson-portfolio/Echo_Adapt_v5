@@ -69,9 +69,10 @@ pub struct Config {
     pub context: ContextConfig,
     pub paths: PathsConfig,
     pub web_search: Option<WebSearchConfig>,
+    pub embeddings: EmbeddingsConfig,
     #[serde(default)]
     pub json_tools: JsonToolsConfig,
-    pub embeddings: EmbeddingsConfig,
+
 }
 
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {

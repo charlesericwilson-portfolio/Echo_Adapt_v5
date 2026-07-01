@@ -64,9 +64,19 @@ pub async fn handle_command(
 
     // Only store in history, DO NOT print raw output ===
     agent.messages.push(json!({"role": "tool", "content": tool_content}));
+    //Log tool
+    let summary = if tool_content.len() > 500 {
+        format!("{}...", &tool_content[..497])
+    } else {
+        tool_content.clone()
+    };
 
-    // Optional: Print a very short confirmation only
-    println!("{}[Tool executed — waiting for Echo to summarize]{}",
+    if let Err(e) = agent.db.log_tool_call("command", command, &summary) {
+        println!("{}Warning: Failed to log command to DB: {}{}",
+                 crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
+    }
+
+    println!("{}[Tool executed — logged to database]{}",
              crate::agent::YELLOW, crate::agent::RESET_COLOR);
 
     Ok(())
