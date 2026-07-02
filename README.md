@@ -2,7 +2,7 @@
 flowchart TD
     A[User sends prompt] --> B[LLM / Echo]
     B --> C[LLM generates reply]
-    C --> D[Tool Extractor checks for <session> or <command>]
+    C --> D[Tool Extractor checks for session or command]
    
     D -->|Session command found| E[Session Manager]
     E --> F[Auto-create or reuse tmux session]
@@ -13,7 +13,7 @@ flowchart TD
     J --> K[Update Database with clean output]
     K --> L[Send tool result back to LLM as 'tool' message]
    
-    D -->|No session command| M[Execute as normal <command>]
+    D -->|No session command| M[Execute as normal command]
     M --> O[Save command result to Database]
     O --> N[Send tool result back to LLM as 'tool' message]
    
