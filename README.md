@@ -108,6 +108,16 @@ OR Test first
   cargo run
   ```
  6. Enjoy yourself and please provide feedback.
+ 7. If you want more restricted environment I have included a bash script to set up a restricted user with restricted access for write only to a workspace directory. You can adjust the permissions as you see fit just make it executable with
+```bash
+chmod +x setup-restricted-model-user.sh
+sudo ./setup-restricted-model-user.sh
+```
+Then in the termianl run 
+```
+su - model-user
+```
+then either cargo run or execute the executable
  
 ## Current Status (June 2026)
 
