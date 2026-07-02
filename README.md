@@ -2,7 +2,7 @@
 flowchart TD
     A[User sends prompt] --> B[LLM / Echo]
     B --> C[LLM generates reply]
-    C --> D[Tool Extractor checks for session:NAME or COMMAND:]
+    C --> D[Tool Extractor checks for <session> or <command>]
    
     D -->|Session command found| E[Session Manager]
     E --> F[Auto-create or reuse tmux session]
