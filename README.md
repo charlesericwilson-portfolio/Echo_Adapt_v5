@@ -13,8 +13,8 @@ flowchart TD
     J --> K[Update Database with clean output]
     K --> L[Send tool result back to LLM as 'tool' message]
    
-    D -->|No session command| M[Execute as normal COMMAND:]
-    M --> O[Save COMMAND result to Database]
+    D -->|No session command| M[Execute as normal <command>]
+    M --> O[Save command result to Database]
     O --> N[Send tool result back to LLM as 'tool' message]
    
     L --> B
