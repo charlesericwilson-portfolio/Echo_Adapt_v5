@@ -26,9 +26,8 @@ flowchart TD
     style K fill:#c084fc,stroke:#6b21a8
     style O fill:#c084fc,stroke:#6b21a8
 ```
-
 ## Feedback Welcome
-This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot. If you want to start at the begining click [here](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview) or for the model training [here](https://github.com/charlesericwilson-portfolio/Echo_training_project)
+This project is still evolving. If you clone it, try it, or have ideas on how to improve it, **please** leave feedback or suggestions. Even small thoughts help a lot. If you want to start at the beginning click [here](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview) or for the model training [here](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 
 ## **If you want to use it with Grok API check out the Grok Adapt branch and working on combining it all in the future.**
 
@@ -46,7 +45,7 @@ The goal of this project is to keep the framework flexible so that the model’s
 
 ### Quick Start
 
-## Supported Backends
+## Supported Back-ends
 
 Echo works with **any server or API that speaks the OpenAI Chat Completions format**. You are **not** locked into llama.cpp.
 
@@ -113,7 +112,7 @@ OR Test first
 chmod +x setup-restricted-model-user.sh
 sudo ./setup-restricted-model-user.sh
 ```
-Then in the termianl run 
+Then in the terminal run 
 ```
 su - model-user
 ```
@@ -187,8 +186,3 @@ Most OpenAI-compatible chat templates only define three message roles: system, u
 This creates a fundamental semantic mismatch. The model was trained to treat user messages as new instructions requiring a response. So when it sees tool output injected as a user message, it reasons: a user gave me new information, I should act on it — and calls another tool. Which produces more output. Which gets injected as another user message. Which triggers another tool call. The loop never resolves because nothing in the token stream signals "this task is complete."
 The Solution
 By extending the tokenizer config to recognize a native tool role as a first-class message type, the model receives tool output in a semantically distinct slot it was trained to understand as feedback from its own actions, not as a new request from a user. It knows the wrapper executed the command on its behalf. It knows the output is the result of something it initiated. And it knows when the task is done because the feedback confirms completion rather than prompting further action.
-
-Persistent sessions with complex tools (full msfconsole workflows) are still being tuned. Context management and summarizer behavior continue to be refined. Database integration for all tool calls for auditing complete. Now supports Json function calling.
-
-Next steps: Building datasets and adding database support. Finetuning the base model check it out [Echo_training_project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
-Developed with AI assistance from Grok(XAI)
