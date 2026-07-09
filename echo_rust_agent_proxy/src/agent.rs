@@ -45,16 +45,17 @@ pub const RESET_COLOR: &str = "\x1b[0m";
 ///
 /// Holds all persistent state for a single agent session:
 /// - `config`: Endpoint, model, prompts, paths, etc.
-/// - `messages`: Full chat history (system + user + assistant + tool messages)
+/// - `messages`: Full chat history (system   user   assistant   tool messages)
 /// - `db`: SQLite database for logging tool calls
 /// - `home_dir`: Working directory for tmux sessions
 /// - `active_sessions`: Currently open tmux sessions (name → metadata)
-/// - `stop_generation`: Atomic flag used by the Ctrl+\ signal handler
+/// - `stop_generation`: Atomic flag used by the Ctrl \ signal handler
 pub struct EchoAgent {
     pub config: Config,
     pub messages: Vec<Value>,
-    pub db: ToolDatabase,/// Intentionally a no-op by design.
+    pub db: ToolDatabase,
     pub home_dir: PathBuf,
+    pub max_turns_counter: u32, // Counter for model-only turns without user input
     pub active_sessions: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -104,6 +105,9 @@ impl EchoAgent {
         let full_system_prompt = format!("{}\n\n{}", main_prompt.trim(), context_content.trim());
         messages.push(json!({"role": "system", "content": full_system_prompt}));
 
+        // Initialize turn counter from config (default if not set)
+        let initial_counter: u32 = 0;
+
         let active_sessions = Arc::new(Mutex::new(HashMap::new()));
 
         // Create the agent first
@@ -112,6 +116,7 @@ impl EchoAgent {
             messages,
             db,
             home_dir,
+            max_turns_counter: initial_counter, // Start at zero
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
@@ -126,13 +131,16 @@ impl EchoAgent {
     ///
     /// - Prints the prompt and reads user input.
     /// - Handles `quit` / `exit`.
-    /// - Sets up Ctrl+\ (SIGQUIT) handler for interrupting generation.
+    /// - Sets up Ctrl \ (SIGQUIT) handler for interrupting generation.
     /// - Calls `process_turn()` for each user message.
     /// - Cleans up tmux sessions on exit.
     pub async fn run(&mut self) -> Result<()> {
         println!("Echo: Ready. Type 'quit' or 'exit' to end session.\n");
 
-        // Set up Ctrl+\ interrupt handler
+        // Always reset turns counter on start
+        self.max_turns_counter = 0;
+
+        // Set up Ctrl \ interrupt handler
         let mut quit = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::quit())
             .expect("Failed to set up SIGQUIT handler");
 
@@ -141,7 +149,7 @@ impl EchoAgent {
         tokio::spawn(async move {
             while quit.recv().await.is_some() {
                 stop_flag.store(true, Ordering::SeqCst);
-                println!("\n[Generation interrupted by Ctrl+\\]");
+                println!("\n[Generation interrupted by Ctrl \\]");
             }
         });
 
@@ -159,6 +167,9 @@ impl EchoAgent {
                 break;
             }
 
+            // Reset turns on every new user input
+            self.max_turns_counter = 0;
+
             self.messages.push(json!({"role": "user", "content": trimmed_input}));
 
             let final_response = self.process_turn(trimmed_input).await?;
@@ -166,7 +177,7 @@ impl EchoAgent {
             println!("{}Echo:\n{}\n{}", LIGHT_BLUE, final_response.trim(), RESET_COLOR);
         }
         // Sessions are intentionally kept alive after exit for engagement continuity.
-        // See clean_up_sessions() for details.
+        // See clean_up_sessions() for details (currently a no-op by design).
         clean_up_sessions(&self.active_sessions).await?;
         Ok(())
     }
@@ -193,10 +204,21 @@ impl EchoAgent {
                 "max_tokens": self.config.endpoint.max_tokens
             });
 
-            // Check for user interrupt (Ctrl+\)
+            // Check for user interrupt (Ctrl \)
             if self.stop_generation.load(Ordering::SeqCst) {
                 self.stop_generation.store(false, Ordering::SeqCst);
                 return Ok("[Generation stopped by user]".to_string());
+            }
+
+            // Increment only after we're sure it's a model turn
+            // (not triggered by tools or resets)
+            self.max_turns_counter  = 1;
+
+            // Check the limit before proceeding
+            if self.max_turns_counter >= self.config.context.max_turns {
+                // Call our safety handler
+                let _ = self.handle_max_trigger().await;
+                return Ok("[Triggered inactivity pause]".to_string());
             }
 
             // Call the LLM
@@ -211,6 +233,8 @@ impl EchoAgent {
                 .unwrap_or("")
                 .trim()
                 .to_string();
+
+            // Don't reset here — handled in run() on user input
 
             // === Check for tool calls FIRST, before pushing anything to history ===
                         // === Check for tool calls FIRST, before pushing anything to history ===
@@ -300,8 +324,40 @@ impl EchoAgent {
                     summarize_context(&mut self.messages, &self.config).await?;
                 }
 
+                // Reset turns after a final response (user gets new chance)
+                self.max_turns_counter = 0;
+
                 return Ok(response_text);
             }
         }
+    }
+
+    /// New method: Handle MAX Turns trigger gracefully
+    async fn handle_max_trigger(&mut self) -> Result<()> {
+        println!(
+            "{}⚠️ [SAFETY TRIGGER] Model has responded {} times without user input. Pausing...{}",
+            YELLOW, self.config.context.max_turns, RESET_COLOR
+        );
+
+        // Log to history as a safety message from the assistant
+        let trigger_message = json!({
+            "role": "assistant",
+            "content": format!(
+                "You have gone {} turns without human interaction. Pausing now.",
+                self.config.context.max_turns,
+            )
+        });
+
+        self.messages.push(trigger_message.clone());
+
+        // Optional: Notify via other channels (e.g. external log)
+        save_chat_log_entry(&self.home_dir, "", &trigger_message["content"].as_str().unwrap_or(""), "SAFETY").await?;
+
+        // Reset counter so it doesn't keep triggering
+        self.max_turns_counter = 0;
+
+        // Could add: sleep(), ask for approval to continue, etc.
+
+        Ok(())
     }
 }
