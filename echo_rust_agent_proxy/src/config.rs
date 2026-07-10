@@ -57,6 +57,7 @@ pub struct SecurityConfig {
 #[derive(Debug, Deserialize)]
 pub struct ContextConfig {
     pub summarize_threshold: usize,
+    pub max_turns: u32,
 }
 
 

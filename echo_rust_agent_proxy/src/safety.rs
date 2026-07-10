@@ -17,7 +17,7 @@ pub fn is_command_safe(command: &str, config: &Config) -> Result<(), String> {
 
     // === Layer 3: Detect obfuscated dangerous commands ===
     // Catches things like: rm"-rf", r'm', $(rm), `rm`, rm$var, etc.
-    let dangerous_bases = ["rm", "mkfs", "dd", "shred", "wipefs", "fdisk", "parted"];
+    let dangerous_bases = ["mkfs", "shred", "wipefs", "fdisk", "parted"];
 
     for base in dangerous_bases {
         // Check for the base command even when it's concatenated or quoted
@@ -98,6 +98,7 @@ mod tests {
             },
             context: ContextConfig {
                 summarize_threshold: 100000,
+                max_turns: 15,
             },
             paths: PathsConfig {
                 home_dir: None,

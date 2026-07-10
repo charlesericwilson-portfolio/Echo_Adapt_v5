@@ -2,12 +2,81 @@ use serde_json::Value;
 use anyhow::Result;
 use chrono::Local;
 use crate::log::save_chat_log_entry;
-use scraper::{Html, Selector};
 use std::time::Duration;
 use crate::memory::Memory;
 use std::path::PathBuf;
+use crate::config::WebSearchConfig;
+use scraper::Html;
+use scraper::Selector;
 
-pub async fn handle_json_tool_call_str(tool_call: &str, _web_search_url: Option<&str>, enabled_tools: &[String],) -> Result<String> {
+//  MAIN JSON TOOL HANDLER
+
+pub async fn handle_json_tool(
+    agent: &mut crate::agent::EchoAgent,
+    user_input: &str,
+    _current_response: &str,
+    json_content: &str,
+) -> Result<()> {
+    println!("{}Echo: Detected JSON tool call{}",
+             crate::agent::YELLOW, crate::agent::RESET_COLOR);
+
+    let enabled_tools = &agent.config.json_tools.enabled;
+
+    // Memory tools
+    if let Some(tool_name) = extract_tool_name(json_content) {
+        if tool_name == "append_memory" || tool_name == "read_memory" {
+            let arguments = parse_arguments(json_content);
+            match handle_memory_tool(agent, &tool_name, &arguments).await {
+                Ok(result) => {
+                    let tool_content = format!("Tool output:\n{}", result);
+                    save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
+                    agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+                }
+                Err(e) => {
+                    let error_msg = format!("Memory Tool error: {}", e);
+                    agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    // Regular tools (passes config)
+    match handle_json_tool_call_str(json_content, agent.config.web_search.as_ref(), enabled_tools).await {
+        Ok(result) => {
+            if let Some(tool_name) = extract_tool_name(json_content) {
+                println!("{}Echo: [TOOL] {} executed{}",
+                         crate::agent::YELLOW, tool_name, crate::agent::RESET_COLOR);
+            }
+
+            let tool_content = format!("Tool output:\n{}", result);
+            save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
+            agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+            agent.messages.push(serde_json::json!({
+                "role": "user",
+                "content": "Summarize the tool result above and continue with the next step or final answer."
+            }));
+        }
+        Err(e) => {
+            let error_msg = format!("JSON Tool error: {}", e);
+            agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+            agent.messages.push(serde_json::json!({
+                "role": "user",
+                "content": "Summarize the tool result above and continue with the next step or final answer."
+            }));
+        }
+    }
+
+    Ok(())
+}
+
+//  TOOL CALL PARSER
+
+pub async fn handle_json_tool_call_str(
+    tool_call: &str,
+    web_search_config: Option<&WebSearchConfig>,
+    enabled_tools: &[String],
+) -> Result<String> {
     let parsed: Value = serde_json::from_str(tool_call)
         .map_err(|e| anyhow::anyhow!("Failed to parse JSON tool call: {}", e))?;
 
@@ -44,7 +113,9 @@ pub async fn handle_json_tool_call_str(tool_call: &str, _web_search_url: Option<
 
         "web_search" => {
             let query = arguments["query"].as_str().unwrap_or("No query provided");
-            match web_search(query).await {
+            let config = web_search_config.ok_or_else(|| anyhow::anyhow!("Web search not configured"))?;
+
+            match web_search(query, config).await {
                 Ok(results) => Ok(format!("Web search results for '{}':\n\n{}", query, results)),
                 Err(e) => Ok(format!("Web search failed: {}", e)),
             }
@@ -63,165 +134,36 @@ pub async fn handle_json_tool_call_str(tool_call: &str, _web_search_url: Option<
     }
 }
 
-// Memory tool handler
-pub async fn handle_memory_tool(
-    agent: &mut crate::agent::EchoAgent,
-    tool_name: &str,
-    arguments: &Value,
-) -> Result<String> {
-    let memory = Memory::new(PathBuf::from(&agent.config.paths.memory_file));
+//  TAVILY WEB SEARCH
 
-    match tool_name {
-        "append_memory" => {
-            let category = arguments["category"].as_str().unwrap_or("General");
-            let content = arguments["content"].as_str().unwrap_or("");
-
-            println!("{}Echo: [MEMORY] append_memory → category: {}{}",
-                     crate::agent::YELLOW, category, crate::agent::RESET_COLOR);
-
-            memory.append(category, content, agent).await?;
-            Ok("Memory updated successfully.".to_string())
-        }
-
-        "read_memory" => {
-            let query = arguments["query"].as_str().unwrap_or("");
-            let limit = arguments["limit"].as_u64().unwrap_or(5) as usize;
-
-            println!("{}Echo: [MEMORY] read_memory → query: '{}' (limit: {}){}",
-                     crate::agent::YELLOW, query, limit, crate::agent::RESET_COLOR);
-
-            memory.read_relevant(query, limit, agent).await
-        }
-
-        _ => Err(anyhow::anyhow!("Unknown memory tool: {}", tool_name)),
-    }
-}
-
-pub async fn handle_json_tool(
-    agent: &mut crate::agent::EchoAgent,
-    user_input: &str,
-    _current_response: &str,
-    json_content: &str,
-) -> Result<()> {
-    println!("{}Echo: Detected JSON tool call{}",
-             crate::agent::YELLOW, crate::agent::RESET_COLOR);
-
-    let web_search_url = agent.config.web_search.as_ref().map(|w| w.url.as_str());
-    let enabled_tools = &agent.config.json_tools.enabled;
-
-    // Memory tools
-    if let Some(tool_name) = extract_tool_name(json_content) {
-        if tool_name == "append_memory" || tool_name == "read_memory" {
-            let arguments = parse_arguments(json_content);
-            match handle_memory_tool(agent, &tool_name, &arguments).await {
-                Ok(result) => {
-                    let tool_content = format!("Tool output:\n{}", result);
-                    save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
-                }
-                Err(e) => {
-                    let error_msg = format!("Memory Tool error: {}", e);
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
-                }
-            }
-            return Ok(());
-        }
-    }
-
-    // Regular tools
-    match handle_json_tool_call_str(json_content, web_search_url, enabled_tools).await {
-        Ok(result) => {
-            // Add specific prints for other tools
-            if let Some(tool_name) = extract_tool_name(json_content) {
-                if tool_name == "browse_page" {
-                    println!("{}Echo: [TOOL] browse_page executed{}",
-                             crate::agent::YELLOW, crate::agent::RESET_COLOR);
-                } else if tool_name == "web_search" {
-                    println!("{}Echo: [TOOL] web_search executed{}",
-                             crate::agent::YELLOW, crate::agent::RESET_COLOR);
-                }
-            }
-
-            let tool_content = format!("Tool output:\n{}", result);
-            save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-            agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
-        }
-        Err(e) => {
-            let error_msg = format!("JSON Tool error: {}", e);
-            agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
-        }
-    }
-
-    Ok(())
-}
-
-// Helper functions
-fn extract_tool_name(json_str: &str) -> Option<String> {
-    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-        if let Some(name) = parsed["name"].as_str() {
-            return Some(name.to_string());
-        }
-        if let Some(function) = parsed["function"].as_object() {
-            if let Some(name) = function["name"].as_str() {
-                return Some(name.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn parse_arguments(json_str: &str) -> Value {
-    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-        if let Some(args) = parsed["arguments"].as_object() {
-            return Value::Object(args.clone());
-        }
-        if let Some(args) = parsed["arguments"].as_str() {
-            if let Ok(obj) = serde_json::from_str::<Value>(args) {
-                return obj;
-            }
-        }
-    }
-    Value::Object(serde_json::Map::new())
-}
-
-pub async fn web_search(query: &str) -> Result<String, anyhow::Error> {
-    let url = format!(
-        "https://html.duckduckgo.com/html/?q={}",
-        urlencoding::encode(query)
-    );
-
+pub async fn web_search(query: &str, config: &WebSearchConfig) -> Result<String, anyhow::Error> {
     let client = reqwest::Client::new();
+
     let response = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (compatible; EchoAgent/1.0)")
+        .post(&config.url)
+        .json(&serde_json::json!({
+            "query": query,
+            "api_key": config.api_key.as_deref().unwrap_or(""),
+            "search_depth": "basic",
+            "max_results": 6
+        }))
         .send()
         .await?;
 
-    let html = response.text().await?;
-    let document = Html::parse_document(&html);
-
-    let result_selector = Selector::parse(".result__a").unwrap();
-    let snippet_selector = Selector::parse(".result__snippet").unwrap();
+    let data: Value = response.json().await?;
 
     let mut results = Vec::new();
+    if let Some(results_array) = data["results"].as_array() {
+        for (i, item) in results_array.iter().take(6).enumerate() {
+            let title = item["title"].as_str().unwrap_or("No title");
+            let link = item["url"].as_str().unwrap_or("No link");
+            let snippet = item["content"].as_str().unwrap_or("No snippet");
 
-    for (i, element) in document.select(&result_selector).take(5).enumerate() {
-        let title = element.text().collect::<String>();
-        let link = element.value().attr("href").unwrap_or("").to_string();
-
-        let snippet = document
-            .select(&snippet_selector)
-            .nth(i)
-            .map(|s| s.text().collect::<String>())
-            .unwrap_or_default();
-
-        results.push(format!(
-            "{}. {}\n   {}\n   {}",
-            i + 1,
-            title.trim(),
-            link,
-            snippet.trim()
-        ));
+            results.push(format!(
+                "{}. {}\n   {}\n   {}",
+                i + 1, title, link, snippet
+            ));
+        }
     }
 
     if results.is_empty() {
@@ -230,6 +172,8 @@ pub async fn web_search(query: &str) -> Result<String, anyhow::Error> {
         Ok(results.join("\n\n"))
     }
 }
+
+//  BROWSE PAGE (unchanged)
 
 pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, anyhow::Error> {
     let client = reqwest::Client::builder()
@@ -264,6 +208,71 @@ pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, 
     };
 
     Ok(truncated)
+}
+
+//  MEMORY TOOL HANDLER (unchanged)
+
+pub async fn handle_memory_tool(
+    agent: &mut crate::agent::EchoAgent,
+    tool_name: &str,
+    arguments: &Value,
+) -> Result<String> {
+    let memory = Memory::new(PathBuf::from(&agent.config.paths.memory_file));
+
+    match tool_name {
+        "append_memory" => {
+            let category = arguments["category"].as_str().unwrap_or("General");
+            let content = arguments["content"].as_str().unwrap_or("");
+
+            println!("{}Echo: [MEMORY] append_memory → category: {}{}",
+                     crate::agent::YELLOW, category, crate::agent::RESET_COLOR);
+
+            memory.append(category, content, agent).await?;
+            Ok("Memory updated successfully.".to_string())
+        }
+
+        "read_memory" => {
+            let query = arguments["query"].as_str().unwrap_or("");
+            let limit = arguments["limit"].as_u64().unwrap_or(5) as usize;
+
+            println!("{}Echo: [MEMORY] read_memory → query: '{}' (limit: {}){}",
+                     crate::agent::YELLOW, query, limit, crate::agent::RESET_COLOR);
+
+            memory.read_relevant(query, limit, agent).await
+        }
+
+        _ => Err(anyhow::anyhow!("Unknown memory tool: {}", tool_name)),
+    }
+}
+
+//  HELPERS (unchanged)
+
+fn extract_tool_name(json_str: &str) -> Option<String> {
+    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+        if let Some(name) = parsed["name"].as_str() {
+            return Some(name.to_string());
+        }
+        if let Some(function) = parsed["function"].as_object() {
+            if let Some(name) = function["name"].as_str() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn parse_arguments(json_str: &str) -> Value {
+    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+        if let Some(args) = parsed["arguments"].as_object() {
+            return Value::Object(args.clone());
+        }
+        if let Some(args) = parsed["arguments"].as_str() {
+            if let Ok(obj) = serde_json::from_str::<Value>(args) {
+                return obj;
+            }
+        }
+    }
+    Value::Object(serde_json::Map::new())
 }
 
 pub fn extract_json_tool(response: &str) -> Option<String> {

@@ -247,6 +247,10 @@ pub async fn handle_session_command(
 
         agent.messages.push(json!({"role": "assistant", "content": format!("Executed command in session '{}'", session_name)}));
         agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.messages.push(serde_json::json!({
+            "role": "user",
+            "content": "Summarize the tool result above and continue with the next step or final answer."
+        }));
 
     } else {
         // END_SESSION case
@@ -254,6 +258,10 @@ pub async fn handle_session_command(
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
         let tool_content = format!("Session '{}' has been terminated.", session_name);
         agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.messages.push(serde_json::json!({
+            "role": "user",
+            "content": "Summarize the tool result above and continue with the next step or final answer."
+        }));
     }
 
     Ok(())
