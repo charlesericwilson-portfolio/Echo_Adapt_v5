@@ -37,7 +37,7 @@ It is a continuation of the earlier [Echo Adapt_v3](https://github.com/charleser
 Key idea: If your model can already tell you what commands to type and doesn't use a jinja template, it can use tools through this framework. No special fine-tuning is required.
 
 The raw text methods are ready to use out of the box.
-JSON tool support is also available, we have a reliable web search using duck duck go and we have a browse page function that reads the pages found in the search results. The way for the model to use them has been added to the sample system prompt included in the repo.
+JSON tool support is also available, we have a reliable web search using tavily it is free to get an api for the search and we have a browse page function that reads the pages found in the search results. The way for the model to use them has been added to the sample system prompt included in the repo.
 A basic system prompt is included to teach the model the tool format, but you can replace it with your own.
 
 Current version: Rust v5 (previous Python proxy version was v4)
