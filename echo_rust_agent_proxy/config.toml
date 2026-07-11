@@ -14,11 +14,12 @@ url = "http://localhost:8080/v1/chat/completions"  # or same as main if using ch
 model = "Echo"  # or a dedicated embedding model
 
 [web_search]
-url = "http://localhost:8081/search"
+url = "https://api.tavily.com/search"
+api_key = ""
 
 [paths]
 home_dir = ""
-context_file = "/home/eric/echo/Echo_rag/Echo-context.txt"
+context_file = ""
 database = "echo_tools.db"
 memory_file = "memory.md"
 
@@ -32,11 +33,12 @@ enabled = [
     "web_search",
     "browse_page",
     "append_memory",
-    "read_memory"
+    "read_memory",
 ]
 
 [context]
 summarize_threshold = 180000
+max_turns = 15 # max_turns = X   # Number of model-only turns allowed before triggering safety pause
 
 [security]
 denylist = [
@@ -44,7 +46,7 @@ denylist = [
     "rm -r /",
     "$(echo rm) -rf /tmp",
     "> /dev/",
-    "dd if=/dev/zero",
+    "if=/dev/zero",
     "mkfs",
     "shred",
     "wipefs",
