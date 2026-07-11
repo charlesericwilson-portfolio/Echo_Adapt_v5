@@ -52,18 +52,12 @@ pub async fn handle_json_tool(
             let tool_content = format!("Tool output:\n{}", result);
             save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
             agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
-            agent.messages.push(serde_json::json!({
-                "role": "user",
-                "content": "Summarize the tool result above and continue with the next step or final answer."
-            }));
+
         }
         Err(e) => {
             let error_msg = format!("JSON Tool error: {}", e);
             agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
-            agent.messages.push(serde_json::json!({
-                "role": "user",
-                "content": "Summarize the tool result above and continue with the next step or final answer."
-            }));
+
         }
     }
 
