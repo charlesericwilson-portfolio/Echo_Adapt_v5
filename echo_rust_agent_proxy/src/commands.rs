@@ -64,10 +64,7 @@ pub async fn handle_command(
 
     // Only store in history, DO NOT print raw output ===
     agent.messages.push(json!({"role": "tool", "content": tool_content}));
-    agent.messages.push(serde_json::json!({
-        "role": "user",
-        "content": "Summarize the tool result above and continue with the next step or final answer."
-    }));
+
     //Log tool
     let summary = if tool_content.len() > 500 {
         format!("{}...", &tool_content[..497])
