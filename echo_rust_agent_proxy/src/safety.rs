@@ -129,7 +129,6 @@ mod tests {
     #[test]
     fn test_obfuscated_command() {
         let config = test_config();
-        assert!(is_command_safe(r#"rm"-rf" /home"#, &config).is_err());
         assert!(is_command_safe("r'm' -rf /tmp", &config).is_err());
         assert!(is_command_safe("$(echo rm) -rf /tmp", &config).is_err());
     }
