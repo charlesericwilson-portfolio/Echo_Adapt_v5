@@ -72,8 +72,17 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
 
 > **Note:** Anthropic, Google Gemini, and raw Hugging Face endpoints are **not** supported at this time. In the process of adding a selector to pick between protocols.
 
-
- 1. Make sure your [llama.cpp](https://github.com/ggml-org/llama.cpp) servers are running
+ 1. If you want more restricted environment I have included a bash script to set up a restricted user with restricted access for write only to a workspace directory. You can adjust the permissions as you see fit just make it executable with or skip to the next step and run as the current user.
+```bash
+chmod +x setup-restricted-model-user.sh
+sudo ./setup-restricted-model-user.sh
+```
+Then in the terminal run 
+```
+su - model-user
+./run.sh
+```
+ 2. Make sure your [llama.cpp](https://github.com/ggml-org/llama.cpp) servers are running
 ```bash
     - git clone https://github.com/ggml-org/llama.cpp
     - cd llama.cpp
@@ -82,41 +91,36 @@ Echo works with **any server or API that speaks the OpenAI Chat Completions form
 ```
     - Main model: port 8080
     - Summarizer (small model): port 8082
- 2. Install dependencies
-```bash
-    - sudo apt install tmux
-    - sudo apt install cargo
-    - sudo apt install rustup
-```
  3. Clone the repo
  ```bash
-  git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5/tree/main
-  cd Echo_Adapt_v5/echo_rust_agent_proxy
+  git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5
+  cd Echo_Adapt_v5
 ```
- 4. Edit the config file for your enpoints and system prompts starting system prompts are in echo_rust_agent_proxy/main_system.txt and echo_rust_agent_proxy/summarizer.txt
+ 4. Edit the config file for your enpoints and system prompts starting system prompts are in Echo_Adapt_v5/main_system.txt and Echo_Adapt_v5/summarizer.txt
   
- 5. **Build or run Rust version**
+ 5. **Make scripts executable**
 ```bash
-  cd [build directory]
-  cargo build --release
-  ./target/release/echo_rust_wrapper
+  cd Echo_Adapt_v5
+  chmod +x install-deps.sh build.sh run.sh
   ```
-OR Test first
+ 6. Install dependancies
 ```bash
-  cd [build directory]
+  cd Echo_Adapt_v5
+  ./install-deps.sh
+``` 
+ 7. Build and run 
+Test first
+```bash
+  cd Echo_Adapt_v5
   cargo run
   ```
- 6. Enjoy yourself and please provide feedback.
- 7. If you want more restricted environment I have included a bash script to set up a restricted user with restricted access for write only to a workspace directory. You can adjust the permissions as you see fit just make it executable with
 ```bash
-chmod +x setup-restricted-model-user.sh
-sudo ./setup-restricted-model-user.sh
+  ./build.sh
 ```
-Then in the terminal run 
+```bash
+  ./run.sh
 ```
-su - model-user
-```
-then either cargo run or execute the executable
+ 8. Enjoy yourself and please provide feedback.
  
 ## Current Status (June 2026)
 
@@ -167,12 +171,12 @@ This makes Echo much better at long-term recall and consistency across sessions.
 ### What it does
 - Supports **hybrid raw-text tool calling** and Json:
   - `<command> command here </command>` for simple one-shot shell commands
-  - `<session name = NAME> command here </session>` for persistent tmux sessions (ideal for msfconsole, long-running shells, etc.)
+  - `<session name ="NAME"> command here </session>` for persistent tmux sessions (ideal for msfconsole, long-running shells, etc.)
   - `<json> <Open AI tool format> </json>`
-  - `<end_session name = NAME/>`
-- Automatic tmux session creation/reuse
+  - `<end_session name ="NAME"/>`
+- Automatic tmux session creation/reuse and auto close after 1hr or the model can close them.
 - Marker- time based clean output capture (only returns new command output, not full session history)
-- Safety deny list (blocks dangerous commands before execution)
+- Safety deny list (blocks dangerous commands before execution) Then the OS handles permissions from restricted user account.
 - JSONL logging in ShareGPT format (already capturing training examples of when/why to use SESSION vs COMMAND)
 - Fast blocking HTTP client talking to your local llama.cpp servers
 - Sqlite database support for tool logging.
