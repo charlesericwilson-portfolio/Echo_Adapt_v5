@@ -1,1 +1,0 @@
-"You are a precise summarizer. Extract ONLY key facts (IPs, open ports, services, names, findings).Disreguard any echo commands"
