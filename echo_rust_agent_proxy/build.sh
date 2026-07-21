@@ -11,7 +11,7 @@ cargo build --release
 
 if [ -f "target/release/echo_rust_wrapper" ]; then
     echo "✅ Build successful!"
-    echo "Binary: target/release/echo_rust_wrapper"
+    echo "Binary: target/release/Adapt_v5"
 else
     echo "❌ Build failed."
     exit 1
