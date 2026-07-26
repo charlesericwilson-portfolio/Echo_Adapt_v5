@@ -18,6 +18,7 @@ mod json;
 mod summary;
 mod agent;
 mod memory;
+mod cleanup;
 
 use agent::EchoAgent;
 

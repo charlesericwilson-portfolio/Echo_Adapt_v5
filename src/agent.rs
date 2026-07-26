@@ -35,6 +35,7 @@ use crate::sessions::{extract_session_command, extract_end_command, clean_up_ses
 use crate::log::save_chat_log_entry;
 use crate::commands::extract_command;
 use crate::json::extract_json_tool;
+use crate::cleanup::{extract_cleanup, handle_cleanup};
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -212,7 +213,7 @@ impl EchoAgent {
 
             // Increment only after we're sure it's a model turn
             // (not triggered by tools or resets)
-            self.max_turns_counter  = 1;
+            self.max_turns_counter  = self.max_turns_counter.saturating_add(1);
 
             // Check the limit before proceeding
             if self.max_turns_counter >= self.config.context.max_turns {
@@ -309,6 +310,23 @@ impl EchoAgent {
                     println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
                 }
                 crate::json::handle_json_tool(self, user_input, &response_text, &json_content).await?;
+                continue;
+
+                } else if extract_cleanup(&response_text).is_some() { // <--- ADD THIS BRANCH
+                // Clean the <cleanup> / <cleanup/> tags from the model's reasoning response
+                let cleaned = response_text
+                    .replace("<cleanup/>", "")
+                    .replace("<cleanup>", "")
+                    .trim()
+                    .to_string();
+
+                self.messages.push(json!({"role": "assistant", "content": cleaned}));
+                if !cleaned.trim().is_empty() {
+                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
+                }
+
+                // Execute the relative workspace/temp cleanup
+                handle_cleanup(self, user_input).await?;
                 continue;
             } else {
                 // No tool flag found → this is the final answer

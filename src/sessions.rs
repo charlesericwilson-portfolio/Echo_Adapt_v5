@@ -15,32 +15,44 @@ pub async fn start_or_reuse_session(
     home_dir: PathBuf,
     active_sessions: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
     name: &str,
-    command: &str,
+    _command: &str,
 ) -> Result<()> {
-    let mut sessions = active_sessions.lock().await;
-    sessions.insert(name.to_string(), (String::new(), Instant::now()));
-    drop(sessions);
+    {
+        let mut sessions = active_sessions.lock().await;
 
-    // Check if session exists
+        sessions
+            .entry(name.to_string())
+            .and_modify(|(_, last_used)| {
+                *last_used = Instant::now();
+            })
+            .or_insert_with(|| {
+                (String::new(), Instant::now())
+            });
+    }
+
     let check = Command::new("tmux")
         .args(["has-session", "-t", name])
-        .status().await?;
+        .status()
+        .await?;
 
     if !check.success() {
-        // Create new detached session
-        Command::new("tmux")
+        let status = Command::new("tmux")
             .args(["new-session", "-d", "-s", name])
             .current_dir(&home_dir)
-            .status().await?;
+            .status()
+            .await?;
+
+        if !status.success() {
+            return Err(anyhow::anyhow!(
+                "Failed to create tmux session '{}'",
+                name
+            ));
+        }
+
         println!("Created new tmux session: {}", name);
     } else {
         println!("Reusing existing tmux session: {}", name);
     }
-
-    // Send the command
-    Command::new("tmux")
-        .args(["send-keys", "-t", name, command, "Enter"])
-        .status().await?;
 
     Ok(())
 }
