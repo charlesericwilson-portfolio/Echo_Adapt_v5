@@ -129,6 +129,7 @@ Test first
 - **Stable** multi-line command and file writing support with xml tags <command>command here</command>. You can change the flag name in the code before compile right now but will eventually be going into config.toml
 - **JSON function calling** is functional I have included a web search tool and a browse page tool to read the results and you can define your own tools according to your needs.
 - **Semantic search cross thread memory** memory functions append_memory to save memories and embeddings and read_memory to do a semantic search only pulling relevant data into context.
+- **Added a hardcoded cleanup tool to support the user-model setup working directory that removes workspace/temp/* after task completion with a single tag <cleanup/>
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
@@ -167,6 +168,7 @@ This makes Echo much better at long-term recall and consistency across sessions.
 - TOML config file for endpoints, system prompt, and allowed tools, still adding features to the TOML.
 - Cleaner terminal UI
 - Better multi-model support (easy switching between local and cloud models)
+- Most future iterations will be going to Adapt v6 which isn't up yet but will be adding a task scheduler that runs in the background, GUI with integrated tmux tabs, and a thread swapping panel.
   
 ### What it does
 - Supports **hybrid raw-text tool calling** and Json:
