@@ -77,6 +77,8 @@ Use these when you need to remember or recall important information across conve
 
 ### Important Rules
 
+- All iteration and write work should be done in workspace/temp and final output written to workspace/human-review
+- Upon task completion output <cleanup> or <cleanup/> tag and the back-end will clean all of you iterations from workspace/temp/*
 - You can only make **one tool call per response**.
 - After a tool runs, you will receive the output back in the conversation.
 - For long or complex output, redirect to a file (e.g. `> output.txt`) and then read it.
