@@ -50,6 +50,11 @@ pub struct PromptsConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct MessagesConfig {
+    pub tool_role_name: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SecurityConfig {
     pub denylist: Vec<String>,
 }
@@ -73,6 +78,7 @@ pub struct Config {
     pub embeddings: EmbeddingsConfig,
     #[serde(default)]
     pub json_tools: JsonToolsConfig,
+    pub messages: MessagesConfig,
 
 }
 

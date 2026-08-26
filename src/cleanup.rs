@@ -61,7 +61,7 @@ pub async fn handle_cleanup(agent: &mut EchoAgent, user_input: &str) -> Result<(
     println!("🧹 Executed Cleanup: {}", output);
 
     save_chat_log_entry(&agent.home_dir, user_input, &output, "cleanup_tool").await?;
-    agent.messages.push(json!({"role": "tool", "content": output}));
+    agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": output}));
 
     Ok(())
 }

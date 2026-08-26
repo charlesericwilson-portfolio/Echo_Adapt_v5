@@ -30,11 +30,11 @@ pub async fn handle_json_tool(
                 Ok(result) => {
                     let tool_content = format!("Tool output:\n{}", result);
                     save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+                    agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
                 }
                 Err(e) => {
                     let error_msg = format!("Memory Tool error: {}", e);
-                    agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+                    agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": error_msg}));
                 }
             }
             return Ok(());
@@ -51,12 +51,12 @@ pub async fn handle_json_tool(
 
             let tool_content = format!("Tool output:\n{}", result);
             save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-            agent.messages.push(serde_json::json!({"role": "tool", "content": tool_content}));
+            agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
 
         }
         Err(e) => {
             let error_msg = format!("JSON Tool error: {}", e);
-            agent.messages.push(serde_json::json!({"role": "tool", "content": error_msg}));
+            agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": error_msg}));
 
         }
     }

@@ -258,7 +258,7 @@ pub async fn handle_session_command(
                  crate::agent::YELLOW, crate::agent::RESET_COLOR);
 
         agent.messages.push(json!({"role": "assistant", "content": format!("Executed command in session '{}'", session_name)}));
-        agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
 
 
     } else {
@@ -266,7 +266,7 @@ pub async fn handle_session_command(
         println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
         let tool_content = format!("Session '{}' has been terminated.", session_name);
-        agent.messages.push(json!({"role": "tool", "content": tool_content}));
+        agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
 
     }
 

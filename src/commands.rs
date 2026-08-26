@@ -63,7 +63,7 @@ pub async fn handle_command(
     );
 
     // Only store in history, DO NOT print raw output ===
-    agent.messages.push(json!({"role": "tool", "content": tool_content}));
+    agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
 
     //Log tool
     let summary = if tool_content.len() > 500 {
