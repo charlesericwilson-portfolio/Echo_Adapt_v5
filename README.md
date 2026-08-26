@@ -130,7 +130,7 @@ Test first
 - **JSON function calling** is functional I have included a web search tool and a browse page tool to read the results and you can define your own tools according to your needs.
 - **Semantic search cross thread memory** memory functions append_memory to save memories and embeddings and read_memory to do a semantic search only pulling relevant data into context.
 - **Added a hardcoded cleanup tool to support the user-model setup working directory that removes workspace/temp/* after task completion with a single tag <cleanup/>
-- Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
+- Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model as well as tool output message handling so you can use user assistant or tool message whatever you set it to in the config.toml without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
 - Config driven opt in opt out for tool summaries Added tool message naming to the config files.
