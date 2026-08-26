@@ -133,7 +133,7 @@ Test first
 - Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
-- Config driven opt in opt out for tool summaries.
+- Config driven opt in opt out for tool summaries Added tool message naming to the config files.
 - Safety deny-list for dangerous commands as well as obsfication and at the token level. You can add anything you want to block in the config.toml.
 - ShareGPT-style JSONL logging for training data
 
@@ -161,11 +161,11 @@ This makes Echo much better at long-term recall and consistency across sessions.
 - **Persistent Sessions**: Full tmux integration with named sessions and clean output capture
 - **Flexible Architecture**: Designed so users can add their own tools easily
 - **Local-First**: Works with local models (llama.cpp, Ollama, etc.)
-- **Extensible**: Includes full TOML config support for endpoints, system prompts, safety deny list, and tool definitions
+- **Extensible**: Includes full TOML config support for endpoints, system prompts, safety deny list, tool message naming, and tool definitions
 
 ## Roadmap
 
-- TOML config file for endpoints, system prompt, and allowed tools, still adding features to the TOML.
+- TOML config file for endpoints, system prompt, and allowed tools, tool message naming, still adding features to the TOML.
 - Cleaner terminal UI
 - Better multi-model support (easy switching between local and cloud models)
 - Most future iterations will be going to Adapt v6 which isn't up yet but will be adding a task scheduler that runs in the background, GUI with integrated tmux tabs, and a thread swapping panel.
