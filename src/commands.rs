@@ -1,14 +1,15 @@
-// commands.rs
 use anyhow::Result;
 use serde_json::json;
 use crate::safety::is_command_safe;
+use crate::config::ToolTagsConfig;
 use std::io::{self, Write};
 
-/// Extracts a command from <command>multi-line command here</command>
-pub fn extract_command(response_text: &str) -> Option<String> {
-    if let Some(start) = response_text.find("<command>") {
-        if let Some(end) = response_text[start..].find("</command>") {
-            let inner = &response_text[start + 9..start + end];
+/// Extracts a command dynamically based on configured tags
+pub fn extract_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
+    if let Some(start) = response_text.find(&tags.command_open) {
+        let content_start = start + tags.command_open.len();
+        if let Some(end) = response_text[content_start..].find(&tags.command_close) {
+            let inner = &response_text[content_start..content_start + end];
             return Some(inner.trim().to_string());
         }
     }
@@ -65,7 +66,7 @@ pub async fn handle_command(
     // Only store in history, DO NOT print raw output ===
     agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
 
-    //Log tool
+    // Log tool
     let summary = if tool_content.len() > 500 {
         format!("{}...", &tool_content[..497])
     } else {

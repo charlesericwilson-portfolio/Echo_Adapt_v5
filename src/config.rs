@@ -1,6 +1,46 @@
 use serde::Deserialize;
 use std::fs;
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct ToolTagsConfig {
+    #[serde(default = "default_json_open")]
+    pub json_open: String,
+    #[serde(default = "default_json_close")]
+    pub json_close: String,
+    #[serde(default = "default_command_open")]
+    pub command_open: String,
+    #[serde(default = "default_command_close")]
+    pub command_close: String,
+    #[serde(default = "default_session_open")]
+    pub session_open: String,
+    #[serde(default = "default_session_close")]
+    pub session_close: String,
+    #[serde(default = "default_end_session_open")]
+    pub end_session_open: String,
+}
+
+fn default_json_open() -> String { "<json>".to_string() }
+fn default_json_close() -> String { "</json>".to_string() }
+fn default_command_open() -> String { "<command>".to_string() }
+fn default_command_close() -> String { "</command>".to_string() }
+fn default_session_open() -> String { "<session name=\"".to_string() }
+fn default_session_close() -> String { "</session>".to_string() }
+fn default_end_session_open() -> String { "<end_session name=\"".to_string() }
+
+impl Default for ToolTagsConfig {
+    fn default() -> Self {
+        Self {
+            json_open: default_json_open(),
+            json_close: default_json_close(),
+            command_open: default_command_open(),
+            command_close: default_command_close(),
+            session_open: default_session_open(),
+            session_close: default_session_close(),
+            end_session_open: default_end_session_open(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EndpointConfig {
     pub url: String,
@@ -79,6 +119,7 @@ pub struct Config {
     #[serde(default)]
     pub json_tools: JsonToolsConfig,
     pub messages: MessagesConfig,
+    pub tool_tags: ToolTagsConfig,
 
 }
 

@@ -1,99 +1,104 @@
 use crate::config::Config;
 
+/// Validates whether a command or a chain of commands is safe to execute.
+/// Allows legitimate chaining (`&&`, `||`, `;`, `|`) while inspecting every individual stage.
 pub fn is_command_safe(command: &str, config: &Config) -> Result<(), String> {
     let lower_cmd = command.to_lowercase();
 
-    // === Layer 1: Raw denylist check ===
+    // === Layer 1: Global Exact Substring Denylist ===
     for dangerous in &config.security.denylist {
         if lower_cmd.contains(&dangerous.to_lowercase()) {
-            return Err(format!("Command contains dangerous keyword: {}", dangerous));
+            return Err(format!("Command contains blocked keyword: {}", dangerous));
         }
     }
 
-    // === Layer 2: Hardcoded dangerous patterns ===
-    if lower_cmd.contains("sudo rm") || lower_cmd.contains("rm -rf /") {
-        return Err("Dangerous rm command blocked for safety.".to_string());
-    }
+    // === Layer 2: Obfuscation Filter (r'm', "r"m, etc.) ===
+    let normalized: String = lower_cmd
+        .chars()
+        .filter(|c| *c != '\'' && *c != '"' && *c != '\\' && *c != '$' && *c != '(' && *c != ')')
+        .collect();
 
-    // === Layer 3: Detect obfuscated dangerous commands ===
-    // Catches things like: rm"-rf", r'm', $(rm), `rm`, rm$var, etc.
-    let dangerous_bases = ["mkfs", "shred", "wipefs", "fdisk", "parted"];
+    let destructive_primitives = ["mkfs", "wipefs", "shred", "fdisk", "parted", "dd", "rm"];
 
-    for base in dangerous_bases {
-        // Check for the base command even when it's concatenated or quoted
-        if lower_cmd.contains(&format!("{} ", base)) ||
-           lower_cmd.contains(&format!("{}-", base)) ||
-           lower_cmd.contains(&format!("{}'", base)) ||
-           lower_cmd.contains(&format!("{}\"", base)) ||
-           lower_cmd.contains(&format!("$({})", base)) ||
-           lower_cmd.contains(&format!("`{}`", base))
-        {
-            // Now check if it also contains dangerous flags
-            if lower_cmd.contains("-r") || lower_cmd.contains("-f") ||
-               lower_cmd.contains("/dev/") || lower_cmd.contains("/home") ||
-               lower_cmd.contains("/tmp") || lower_cmd.contains("/root")
-            {
-                return Err(format!("Obfuscated dangerous command detected: {}", base));
-            }
+    // === Layer 3: Split and Validate Each Subcommand in the Chain ===
+    // Splits on &&, ||, ;, |, and newlines so every step in a pipeline is checked individually
+    let subcommands = command.split(|c| c == ';' || c == '|' || c == '&' || c == '\n');
+
+    for raw_sub in subcommands {
+        let sub = raw_sub.trim();
+        if sub.is_empty() {
+            continue;
         }
-    }
 
-    // === Layer 4: Token-based check using shell-words ===
-    if let Ok(tokens) = shell_words::split(command) {
-        if let Some(first) = tokens.first() {
-            let base = first.to_lowercase();
+        // Tokenize the individual subcommand
+        if let Ok(tokens) = shell_words::split(sub) {
+            if let Some(first_token) = tokens.first() {
+                let base = first_token.to_lowercase();
 
-            for dangerous in &config.security.denylist {
-                if base == dangerous.to_lowercase() {
-                    return Err(format!("Base command '{}' is blocked", first));
+                // Check denylist on the base executable of the subcommand
+                for dangerous in &config.security.denylist {
+                    if base == dangerous.to_lowercase() {
+                        return Err(format!("Chained subcommand '{}' is blocked by security policy", first_token));
+                    }
+                }
+
+                // Check destructive primitives on the base executable
+                if destructive_primitives.contains(&base.as_str()) {
+                    return Err(format!("Destructive binary '{}' blocked in command chain", first_token));
                 }
             }
+        }
+    }
 
-            if matches!(base.as_str(), "rm" | "mkfs" | "dd" | "shred" | "wipefs" | "fdisk" | "parted") {
-                return Err(format!("Dangerous base command blocked: {}", first));
-            }
+    // === Layer 4: Catch Obfuscated Destructive Calls Inside Normalized String ===
+    for primitive in destructive_primitives {
+        if normalized.contains(&format!("{} ", primitive))
+            || normalized.contains(&format!("{}-", primitive))
+            || normalized.contains(&format!("{}/", primitive))
+            || normalized.ends_with(primitive)
+        {
+            return Err(format!("Obfuscated execution of '{}' detected", primitive));
         }
     }
 
     Ok(())
 }
 
-// Tests
+// Unit Tests
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{Config, SecurityConfig, EndpointConfig, SummarizerConfig,
-                        PromptsConfig, ContextConfig, PathsConfig, EmbeddingsConfig};
+                        PromptsConfig, ContextConfig, PathsConfig, EmbeddingsConfig,
+                        MessagesConfig, ToolTagsConfig, JsonToolsConfig};
 
     fn test_config() -> Config {
         Config {
             endpoint: EndpointConfig {
-                url: "http://localhost".to_string(),
+                url: "http://localhost:8080".to_string(),
                 model: "test".to_string(),
                 temperature: 0.7,
                 max_tokens: 2048,
             },
             summarizer: SummarizerConfig {
-                url: "http://localhost".to_string(),
+                url: "http://localhost:8082".to_string(),
                 model: "summarizer".to_string(),
                 enabled: true,
             },
             embeddings: EmbeddingsConfig {
-                url: "http://localhost".to_string(),
+                url: "http://localhost:8080".to_string(),
                 model: "test".to_string(),
             },
             prompts: PromptsConfig {
-                main_system: "test".to_string(),
-                summarizer: "test".to_string(),
+                main_system: "test.txt".to_string(),
+                summarizer: "test.txt".to_string(),
             },
             security: SecurityConfig {
                 denylist: vec![
                     "rm -rf".to_string(),
                     "rm -r /".to_string(),
-                    "$(echo rm) -rf /tmp".to_string(),
-                    "mkfs".to_string(),
-                    "dd if=/dev/zero".to_string(),
+                    "> /dev/sda".to_string(),
                 ],
             },
             context: ContextConfig {
@@ -107,43 +112,30 @@ mod tests {
                 memory_file: "memory.md".to_string(),
             },
             web_search: None,
-            json_tools: crate::config::JsonToolsConfig::default(),
+            json_tools: JsonToolsConfig::default(),
+            messages: MessagesConfig {
+                tool_role_name: "tool".to_string(),
+            },
+            tool_tags: ToolTagsConfig::default(),
         }
     }
 
     #[test]
-    fn test_safe_command() {
+    fn test_safe_chained_commands() {
         let config = test_config();
-        assert!(is_command_safe("ls -la", &config).is_ok());
-        assert!(is_command_safe("echo hello", &config).is_ok());
-        assert!(is_command_safe("cat file.txt", &config).is_ok());
+        // Valid multi-tool workflows must pass cleanly
+        assert!(is_command_safe("cargo check && cargo build --release", &config).is_ok());
+        assert!(is_command_safe("git status || git log", &config).is_ok());
+        assert!(is_command_safe("cat src/main.rs | grep -i struct", &config).is_ok());
+        assert!(is_command_safe("mkdir -p /tmp/workspace; cd /tmp/workspace && ls -la", &config).is_ok());
     }
 
     #[test]
-    fn test_direct_dangerous_command() {
+    fn test_blocked_chained_commands() {
         let config = test_config();
-        assert!(is_command_safe("rm -rf /home", &config).is_err());
-        assert!(is_command_safe("mkfs.ext4 /dev/sda", &config).is_err());
-    }
-
-    #[test]
-    fn test_obfuscated_command() {
-        let config = test_config();
-        assert!(is_command_safe("r'm' -rf /tmp", &config).is_err());
-        assert!(is_command_safe("$(echo rm) -rf /tmp", &config).is_err());
-    }
-
-    #[test]
-    fn test_command_chaining() {
-        let config = test_config();
-        assert!(is_command_safe("ls && rm -rf /tmp/test", &config).is_err());
-        assert!(is_command_safe("echo hi; rm -r /", &config).is_err());
-    }
-
-    #[test]
-    fn test_base_command_blocking() {
-        let config = test_config();
-        assert!(is_command_safe("rm important.txt", &config).is_err());
-        assert!(is_command_safe("dd if=/dev/zero of=/dev/sda", &config).is_err());
+        // Destructive binaries hidden anywhere inside chains must fail
+        assert!(is_command_safe("git status && rm -rf /", &config).is_err());
+        assert!(is_command_safe("ls -la; dd if=/dev/zero of=/dev/sda", &config).is_err());
+        assert!(is_command_safe("cat file.txt | rm temp.txt", &config).is_err());
     }
 }

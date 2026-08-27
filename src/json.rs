@@ -5,12 +5,11 @@ use crate::log::save_chat_log_entry;
 use std::time::Duration;
 use crate::memory::Memory;
 use std::path::PathBuf;
-use crate::config::WebSearchConfig;
+use crate::config::{WebSearchConfig, ToolTagsConfig};
 use scraper::Html;
 use scraper::Selector;
 
 //  MAIN JSON TOOL HANDLER
-
 pub async fn handle_json_tool(
     agent: &mut crate::agent::EchoAgent,
     user_input: &str,
@@ -52,12 +51,10 @@ pub async fn handle_json_tool(
             let tool_content = format!("Tool output:\n{}", result);
             save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
             agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
-
         }
         Err(e) => {
             let error_msg = format!("JSON Tool error: {}", e);
             agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": error_msg}));
-
         }
     }
 
@@ -65,7 +62,6 @@ pub async fn handle_json_tool(
 }
 
 //  TOOL CALL PARSER
-
 pub async fn handle_json_tool_call_str(
     tool_call: &str,
     web_search_config: Option<&WebSearchConfig>,
@@ -129,7 +125,6 @@ pub async fn handle_json_tool_call_str(
 }
 
 //  TAVILY WEB SEARCH
-
 pub async fn web_search(query: &str, config: &WebSearchConfig) -> Result<String, anyhow::Error> {
     let client = reqwest::Client::new();
 
@@ -167,8 +162,7 @@ pub async fn web_search(query: &str, config: &WebSearchConfig) -> Result<String,
     }
 }
 
-//  BROWSE PAGE (unchanged)
-
+//  BROWSE PAGE
 pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, anyhow::Error> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; EchoAgent/1.0)")
@@ -204,8 +198,7 @@ pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, 
     Ok(truncated)
 }
 
-//  MEMORY TOOL HANDLER (unchanged)
-
+//  MEMORY TOOL HANDLER
 pub async fn handle_memory_tool(
     agent: &mut crate::agent::EchoAgent,
     tool_name: &str,
@@ -239,8 +232,7 @@ pub async fn handle_memory_tool(
     }
 }
 
-//  HELPERS (unchanged)
-
+//  HELPERS
 fn extract_tool_name(json_str: &str) -> Option<String> {
     if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
         if let Some(name) = parsed["name"].as_str() {
@@ -269,10 +261,12 @@ fn parse_arguments(json_str: &str) -> Value {
     Value::Object(serde_json::Map::new())
 }
 
-pub fn extract_json_tool(response: &str) -> Option<String> {
-    if let Some(start) = response.find("<json>") {
-        if let Some(end) = response[start..].find("</json>") {
-            let inner = &response[start + 6..start + end];
+/// Dynamically extracts JSON content based on configured tags
+pub fn extract_json_tool(response: &str, tags: &ToolTagsConfig) -> Option<String> {
+    if let Some(start) = response.find(&tags.json_open) {
+        let content_start = start + tags.json_open.len();
+        if let Some(end) = response[content_start..].find(&tags.json_close) {
+            let inner = &response[content_start..content_start + end];
             return Some(inner.trim().to_string());
         }
     }

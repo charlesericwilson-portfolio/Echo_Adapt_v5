@@ -24,11 +24,21 @@ database = "echo_tools.db"
 memory_file = "memory.md"
 
 [prompts]
-main_system = "/home/eric/prompts/main_system.txt"
-summarizer = "/home/eric/prompts/summarizer.txt"
+main_system = "/home/eric/Echo_Adapt_v5/main_system.txt"
+summarizer = "/home/eric/Echo_Adapt_v5/summarizer.txt"
 
 [messages]
 tool_role_name = "tool"
+
+# Config-driven XML tool tags
+[tool_tags]
+json_open = "<json>"
+json_close = "</json>"
+command_open = "<command>"
+command_close = "</command>"
+session_open = "<session name=\""
+session_close = "</session>"
+end_session_open = "<end_session name=\""
 
 [json_tools]
 enabled = [
