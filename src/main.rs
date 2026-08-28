@@ -19,6 +19,7 @@ mod summary;
 mod agent;
 mod memory;
 mod cleanup;
+mod hotkeys;
 
 use agent::EchoAgent;
 

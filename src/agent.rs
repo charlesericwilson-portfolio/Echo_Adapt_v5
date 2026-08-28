@@ -27,6 +27,7 @@ use crate::log::save_chat_log_entry;
 use crate::commands::extract_command;
 use crate::json::extract_json_tool;
 use crate::cleanup::{extract_cleanup, handle_cleanup};
+use crate::hotkeys::{self, InputAction};
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -120,9 +121,23 @@ impl EchoAgent {
             print!("You: ");
             std::io::stdout().flush()?;
 
-            let mut user_input = String::new();
-            std::io::stdin().read_line(&mut user_input)?;
-            let trimmed_input = user_input.trim();
+            let user_input = match hotkeys::read_user_input()? {
+            InputAction::NewTab => {
+                hotkeys::spawn_new_adapt_tab()?;
+                continue;
+            }
+
+            InputAction::Exit => {
+            println!("Session ended.");
+            save_chat_log_entry(&self.home_dir, "", "", "SESSION_END").await?;
+            break;
+        }
+
+
+            InputAction::Submit(input) => input,
+        };
+
+let trimmed_input = user_input.trim();
 
             if trimmed_input.eq_ignore_ascii_case("quit") || trimmed_input.eq_ignore_ascii_case("exit") {
                 println!("Session ended.");

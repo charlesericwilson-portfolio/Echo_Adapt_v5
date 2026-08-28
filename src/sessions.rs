@@ -11,6 +11,21 @@ use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
 
+fn tmux_session_name(name: &str) -> String {
+    let safe_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    format!("adapt_{}_{}", std::process::id(), safe_name)
+}
+
 pub async fn start_or_reuse_session(
     home_dir: PathBuf,
     active_sessions: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
@@ -30,14 +45,16 @@ pub async fn start_or_reuse_session(
             });
     }
 
+    let tmux_name = tmux_session_name(name);
+
     let check = Command::new("tmux")
-        .args(["has-session", "-t", name])
+        .args(["has-session", "-t", &tmux_name])
         .status()
         .await?;
 
     if !check.success() {
         let status = Command::new("tmux")
-            .args(["new-session", "-d", "-s", name])
+            .args(["new-session", "-d", "-s", &tmux_name])
             .current_dir(&home_dir)
             .status()
             .await?;
@@ -49,7 +66,7 @@ pub async fn start_or_reuse_session(
             ));
         }
 
-        println!("Created new tmux session: {}", name);
+        println!("Created tmux session: {} -> {}", name, tmux_name);
     } else {
         println!("Reusing existing tmux session: {}", name);
     }
@@ -100,12 +117,14 @@ pub async fn execute_in_session(
     name: &str,
     command: String,
 ) -> Result<String> {
+    let tmux_name = tmux_session_name(name);
+
     let timestamp = chrono::Local::now().timestamp();
     let marker_start = format!("===ECHO_START_{}===", timestamp);
     let marker_end = format!("===ECHO_END_{}===", timestamp);
 
     Command::new("tmux")
-        .args(["send-keys", "-t", name, &format!("echo '{}'", marker_start), "Enter"])
+        .args(["send-keys", "-t", &tmux_name, &format!("echo '{}'", marker_start), "Enter"])
         .status().await?;
 
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -113,7 +132,7 @@ pub async fn execute_in_session(
     let chained_command = format!("{}; echo '{}'", command.trim(), marker_end);
 
     Command::new("tmux")
-        .args(["send-keys", "-t", name, &chained_command, "Enter"])
+        .args(["send-keys", "-t", &tmux_name, &chained_command, "Enter"])
         .status().await?;
 
     println!("{}[Session] Waiting for command to finish...{}", crate::agent::YELLOW, crate::agent::RESET_COLOR);
@@ -127,7 +146,7 @@ pub async fn execute_in_session(
         }
 
         let output = Command::new("tmux")
-            .args(["capture-pane", "-p", "-S", "-", "-t", name])
+            .args(["capture-pane", "-p", "-S", "-", "-t", &tmux_name])
             .output().await?;
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
@@ -154,7 +173,12 @@ pub async fn end_session(
     sessions.remove(name);
     drop(sessions);
 
-    let _ = Command::new("tmux").args(["kill-session", "-t", name]).status().await;
+    let tmux_name = tmux_session_name(name);
+
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", &tmux_name])
+        .status()
+        .await;
     Ok(())
 }
 
@@ -178,8 +202,19 @@ pub async fn start_session_cleanup_task(
                 .collect();
 
             for name in to_remove {
-                println!("Auto-killing inactive tmux session: {}", name);
-                let _ = Command::new("tmux").args(["kill-session", "-t", &name]).status().await;
+                let tmux_name = tmux_session_name(&name);
+
+                println!(
+                    "Auto-killing inactive tmux session: {} -> {}",
+                    name,
+                    tmux_name
+                );
+
+                let _ = Command::new("tmux")
+                    .args(["kill-session", "-t", &tmux_name])
+                    .status()
+                    .await;
+
                 sessions.remove(&name);
             }
         }
