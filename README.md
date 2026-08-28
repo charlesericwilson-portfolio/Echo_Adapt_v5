@@ -129,8 +129,9 @@ Test first
 - **Stable** multi-line command and file writing support with xml tags <command>command here</command>. You can change the flag name in the code before compile right now but will eventually be going into config.toml
 - **JSON function calling** is functional I have included a web search tool and a browse page tool to read the results and you can define your own tools according to your needs.
 - **Semantic search cross thread memory** memory functions append_memory to save memories and embeddings and read_memory to do a semantic search only pulling relevant data into context.
-- **Added a hardcoded cleanup tool to support the user-model setup working directory that removes workspace/temp/* after task completion with a single tag <cleanup/>
-- Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model as well as tool output message handling so you can use user assistant or tool message whatever you set it to in the config.toml without recompiling.
+- **Added a hardcoded cleanup tool** to support the user-model setup working directory that removes workspace/temp/* after task completion with a single tag <cleanup/>
+- **Added new instance hotkey** opens a new process of the framework will be part of the threads tab in v6. You can start a new instance with ctl+Alt+n. Also added pid to each process so the tmux panes don't collide if they have the same name when running multiple instances.
+- Refactored to use config.toml to set endpoints and set your system prompts in text files for the main model and the summarizer model as well as tool output message handling so you can use user assistant or tool message and tool tags whatever you set it to in the config.toml without recompiling.
 - Context auto-summarization 
 - SQLite database logging for all tool calls and summaries
 - Config driven opt in opt out for tool summaries Added tool message naming to the config files.
