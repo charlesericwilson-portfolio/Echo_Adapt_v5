@@ -670,7 +670,7 @@ Possible local backends include:
 
 OpenAI-compatible cloud providers may also work when their request and response behavior matches the expected Chat Completions format.
 
-Provider-native protocols such as raw Anthropic or Gemini APIs are **not currently handled directly by this branch**.
+Provider-native there is a Grok branch for this project but usually runs behind this one but it works and the model can run tools on your PC, protocols such as raw Anthropic or Gemini APIs are **not currently handled directly by this branch**.
 
 ---
 
@@ -981,6 +981,9 @@ Current functionality includes actions such as:
 - launching another Adapt instance.
 
 The terminal-launch logic checks several common Linux terminal emulators rather than assuming a single desktop environment.
+ctl+c exits chat
+ctl+\ interrupt generation
+ctl+alt+n start new instance/process
 
 Current fallbacks include terminals such as:
 
@@ -1253,7 +1256,7 @@ Again:
 ### Echo Model
 
 [Echo Instroder v2.2](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
-
+Model on Hugging Face is currently corrupt replacement is in training.
 ---
 
 # License / Use
