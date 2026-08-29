@@ -53,11 +53,29 @@ pub async fn start_or_reuse_session(
         .await?;
 
     if !check.success() {
-        let status = Command::new("tmux")
+        let mut tmux_command = Command::new("tmux");
+
+        tmux_command
             .args(["new-session", "-d", "-s", &tmux_name])
-            .current_dir(&home_dir)
-            .status()
-            .await?;
+            .current_dir(&home_dir);
+
+        // If this user has an Adapt-managed Python venv, expose it
+        // transparently to the new tmux session.
+        let venv_path = home_dir.join(".venv");
+        let venv_bin = venv_path.join("bin");
+
+        if venv_bin.join("python").is_file() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let session_path = format!("{}:{}", venv_bin.display(), current_path);
+
+            tmux_command
+                .arg("-e")
+                .arg(format!("VIRTUAL_ENV={}", venv_path.display()))
+                .arg("-e")
+                .arg(format!("PATH={}", session_path));
+        }
+
+        let status = tmux_command.status().await?;
 
         if !status.success() {
             return Err(anyhow::anyhow!(
