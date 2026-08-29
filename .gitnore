@@ -1,0 +1,10 @@
+# Rust build artifacts
+/target/
+
+# Runtime chat logs
+echo_chat.jsonl
+
+# Editor / temporary files
+*.swp
+*.swo
+*~
