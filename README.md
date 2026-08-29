@@ -932,14 +932,12 @@ Adapt currently includes keyboard controls for interactive operation.
 
 Current functionality includes actions such as:
 
-- interrupting generation,
-- exiting the current chat,
-- launching another Adapt instance.
-
+| Shortcut | Action |
+| :--- | :--- |
+| <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit the current chat |
+| <kbd>Ctrl</kbd> + <kbd>\</kbd> | Interrupt active token generation |
+| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>N</kbd> | Start a new Adapt instance/process |
 The terminal-launch logic checks several common Linux terminal emulators rather than assuming a single desktop environment.
-ctl+c exits chat
-ctl+\ interrupt generation
-ctl+alt+n start new instance/process
 
 Current fallbacks include terminals such as:
 
