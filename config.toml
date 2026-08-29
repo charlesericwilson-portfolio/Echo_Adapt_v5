@@ -24,8 +24,8 @@ database = "echo_tools.db"
 memory_file = "memory.md"
 
 [prompts]
-main_system = "/home/eric/Echo_Adapt_v5/main_system.txt"
-summarizer = "/home/eric/Echo_Adapt_v5/summarizer.txt"
+main_system = "main_system.txt"
+summarizer = "summarizer.txt"
 
 [messages]
 tool_role_name = "tool"
