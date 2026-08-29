@@ -670,7 +670,7 @@ Possible local backends include:
 
 OpenAI-compatible cloud providers may also work when their request and response behavior matches the expected Chat Completions format.
 
-Provider-native there is a Grok branch for this project but usually runs behind this one but it works and the model can run tools on your PC, protocols such as raw Anthropic or Gemini APIs are **not currently handled directly by this branch**.
+There is a Grok branch for this project but usually runs behind this one but it works and the model can run tools on your PC. Anthropic or Gemini APIs are **not currently handled directly by this branch**.
 
 ---
 
@@ -1256,7 +1256,7 @@ Again:
 ### Echo Model
 
 [Echo Instroder v2.2](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
-Model on Hugging Face is currently corrupt replacement is in training.
+Model on Hugging Face is currently down replacement is in training. Use any instruct/coder model to try it. Qwen seems to work the best am currently testing GPT-OSS.
 ---
 
 # License / Use
