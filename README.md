@@ -1154,17 +1154,19 @@ If you build something cool with it, I would like to hear about that too.
 
 # Created With Help From AI
 
-This project has been developed with extensive use of AI as a programming, debugging, research, and design assistant.
+# Created With Help From AI
 
-AI systems used during development have included:
+This project has been developed with extensive use of AI as a programming, debugging, research, and design assistant[cite: 2].
 
-- **Grok**
-- **ChatGPT**
+Rather than relying on a single tool, different models were used for specific stages of the project's development:
 
-I still manually review, test, modify, and learn the code being added to the project.
+* **Grok** — Architecture planning and the initial refactor that broke down the original monolithic `main.rs` (700+ lines) into clean, modular Rust components.
+* **ChatGPT** — Code debugging, edge-case troubleshooting, and Rust error resolution.
+* **Gemini** — Model fine-tuning guidance, LoRA training troubleshooting, dataset structuring, and architectural design iteration (including persistent state experiments and memory framework concepts)[cite: 1].
 
-Part of the reason I maintain the full chain of repositories is to show the actual development process and how the architecture changed over time rather than presenting the final repository as if it appeared fully formed.
+I manually review, test, modify, and learn every piece of code integrated into Adapt[cite: 2]. 
 
+Part of the reason I maintain the full public chain of repositories across the Echo project is to document the actual evolutionary engineering process—showing how architectures mature, break, and get refactored over time rather than pretending the final system appeared out of thin air[cite: 2].
 ---
 
 # Contributing / Feedback
