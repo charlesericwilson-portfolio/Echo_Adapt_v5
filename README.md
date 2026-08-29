@@ -1160,13 +1160,14 @@ This project has been developed with extensive use of AI as a programming, debug
 
 Rather than relying on a single tool, different models were used for specific stages of the project's development:
 
-* **Grok** — Architecture planning and the initial refactor that broke down the original monolithic `main.rs` (700+ lines) into clean, modular Rust components.
+* **Grok** — Architecture planning and the initial refactor that broke down the original monolithic `main.rs` (800+ lines) into clean, modular Rust components.
 * **ChatGPT** — Code debugging, edge-case troubleshooting, and Rust error resolution.
-* **Gemini** — Model fine-tuning guidance, LoRA training troubleshooting, dataset structuring, and architectural design iteration (including persistent state experiments and memory framework concepts)[cite: 1].
+* **Gemini** — Model fine-tuning guidance, LoRA training troubleshooting, dataset structuring, and architectural design iteration (including persistent state experiments and memory framework concepts).
 
-I manually review, test, modify, and learn every piece of code integrated into Adapt[cite: 2]. 
+I manually review, test, modify, and learn every piece of code integrated into Adapt. 
 
-Part of the reason I maintain the full public chain of repositories across the Echo project is to document the actual evolutionary engineering process—showing how architectures mature, break, and get refactored over time rather than pretending the final system appeared out of thin air[cite: 2].
+Part of the reason I maintain the full public chain of repositories across the Echo project is to document the actual evolutionary engineering process—showing how architectures mature, break, and get refactored over time rather than pretending the final system appeared out of thin air.
+
 ---
 
 # Contributing / Feedback
