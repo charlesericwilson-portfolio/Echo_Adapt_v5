@@ -221,6 +221,12 @@ pub async fn start_session_cleanup_task(
     });
 }
 
+/// Intentionally does not terminate tmux sessions on Adapt shutdown.
+///
+/// Sessions are allowed to survive the owning Adapt process so that a
+/// restarted chat can recover session state from the database and reconnect
+/// to existing tmux sessions. Inactive sessions are handled separately by
+/// the session cleanup task and expire after the configured inactivity period.
 pub async fn clean_up_sessions(
     _active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>
 ) -> Result<()> {
