@@ -2,7 +2,6 @@ use anyhow::Result;
 use serde_json::json;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
-use std::io::{self, Write};
 
 /// Extracts a command dynamically based on configured tags
 pub fn extract_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
@@ -31,27 +30,35 @@ pub async fn handle_command(
     }
 
     // === SUDO SUPPORT ===
+    // Adapt never handles the user's password directly.
+    // sudo performs authentication through the user's terminal.
     let needs_sudo = command.trim().to_lowercase().starts_with("sudo ");
-    let mut final_cmd = command.trim().to_string();
 
     if needs_sudo {
-        print!("{}[SUDO] Enter sudo password: {}", crate::agent::YELLOW, crate::agent::RESET_COLOR);
-        io::stdout().flush()?;
-        let mut password = String::new();
-        io::stdin().read_line(&mut password)?;
-        let password = password.trim();
-
-        final_cmd = format!(
-            "echo '{}' | sudo -S {}",
-            password.replace("'", "'\\''"),
-            command.trim().strip_prefix("sudo ").unwrap_or(command.trim())
+        println!(
+            "{}[SUDO] This command requires elevated privileges.{}",
+            crate::agent::YELLOW,
+            crate::agent::RESET_COLOR
         );
+
+        let status = std::process::Command::new("sudo")
+            .arg("-v")
+            .status()
+            .map_err(|e| anyhow::anyhow!("Failed to request sudo authentication: {}", e))?;
+
+        if !status.success() {
+            agent.messages.push(json!({
+                "role": &agent.config.messages.tool_role_name,
+                "content": "Tool error: sudo authentication failed."
+            }));
+            return Ok(());
+        }
     }
 
     // Execute
     let output_cmd = std::process::Command::new("sh")
         .arg("-c")
-        .arg(&final_cmd)
+        .arg(command.trim())
         .output()
         .map_err(|e| anyhow::anyhow!("Failed to execute '{}': {}", command, e))?;
 
@@ -68,7 +75,13 @@ pub async fn handle_command(
 
     // Log tool
     let summary = if tool_content.len() > 500 {
-        format!("{}...", &tool_content[..497])
+        let mut end = 497.min(tool_content.len());
+
+        while end > 0 && !tool_content.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        format!("{}...", &tool_content[..end])
     } else {
         tool_content.clone()
     };
