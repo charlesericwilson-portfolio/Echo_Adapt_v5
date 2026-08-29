@@ -1,17 +1,15 @@
-#!/bin/bash
-# run.sh - Run the agent (builds if needed)
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BINARY="$SCRIPT_DIR/target/release/Adapt_v5"
 
-echo "=== Running Echo Adapt v5 ==="
+cd "$SCRIPT_DIR"
 
-cd "$(dirname "$0")"
-
-# Auto-build if binary missing
-if [ ! -f "target/release/echo_rust_wrapper" ]; then
-    echo "Binary not found. Building first..."
-    ./build.sh
+if [[ ! -x "$BINARY" ]]; then
+    echo "Adapt_v5 has not been built. Building..."
+    "$SCRIPT_DIR/build.sh"
 fi
 
-echo "Launching agent..."
-./target/release/Adapt_v5
+echo "=== Running Echo Adapt v5 ==="
+exec "$BINARY"
