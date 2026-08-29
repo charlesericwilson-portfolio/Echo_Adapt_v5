@@ -1154,9 +1154,7 @@ If you build something cool with it, I would like to hear about that too.
 
 # Created With Help From AI
 
-# Created With Help From AI
-
-This project has been developed with extensive use of AI as a programming, debugging, research, and design assistant[cite: 2].
+This project has been developed with extensive use of AI as a programming, debugging, research, and design assistant.
 
 Rather than relying on a single tool, different models were used for specific stages of the project's development:
 
