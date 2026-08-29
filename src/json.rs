@@ -299,16 +299,31 @@ fn extract_tool_name(json_str: &str) -> Option<String> {
 }
 
 fn parse_arguments(json_str: &str) -> Value {
-    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-        if let Some(args) = parsed["arguments"].as_object() {
-            return Value::Object(args.clone());
-        }
-        if let Some(args) = parsed["arguments"].as_str() {
-            if let Ok(obj) = serde_json::from_str::<Value>(args) {
-                return obj;
-            }
+    let parsed = match serde_json::from_str::<Value>(json_str) {
+        Ok(parsed) => parsed,
+        Err(_) => return Value::Object(serde_json::Map::new()),
+    };
+
+    let function = if parsed["tool_calls"].is_array()
+        && parsed["tool_calls"][0]["function"].is_object()
+    {
+        &parsed["tool_calls"][0]["function"]
+    } else if parsed["function"].is_object() {
+        &parsed["function"]
+    } else {
+        &parsed
+    };
+
+    if let Some(args) = function["arguments"].as_object() {
+        return Value::Object(args.clone());
+    }
+
+    if let Some(args) = function["arguments"].as_str() {
+        if let Ok(value) = serde_json::from_str::<Value>(args) {
+            return value;
         }
     }
+
     Value::Object(serde_json::Map::new())
 }
 
