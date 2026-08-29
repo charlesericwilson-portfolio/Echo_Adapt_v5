@@ -108,32 +108,6 @@ flowchart TD
 
     B --> H
 ```
-````
-
-
-```mermaid
-flowchart LR
-    U[User] --> M[LLM]
-    M --> P[Adapt Parser]
-
-    P --> C[One-shot Commands]
-    P --> S[Persistent tmux Sessions]
-    P --> J[JSON Tools]
-    P --> X[Cleanup Tool]
-
-    C --> OS[Operating System]
-    S --> OS
-    J --> API[Functions / APIs / Memory]
-    X --> W[Workspace]
-
-    OS --> R[Tool Result]
-    API --> R
-    W --> R
-
-    R --> M
-    M --> U
-```
-
 The framework handles execution.
 
 The model handles reasoning.
