@@ -69,6 +69,49 @@ It is closer to an **execution environment for an AI model**.
 The model reasons normally, produces a tool request using a small configurable protocol, Adapt executes that request, and the result is returned to the model using a dedicated tool message.
 
 ```mermaid
+flowchart TD
+    A[User Prompt] --> B[Main Model]
+
+    B --> C{Tool detected?}
+
+    C -->|Command| D[Command Handler]
+    C -->|Session| E[Session Manager]
+    C -->|JSON| F[JSON Tool Handler]
+    C -->|Cleanup| G[Workspace Cleanup]
+    C -->|No| H[Final Response]
+
+    D --> I[Safety Check]
+    E --> I
+
+    I -->|Allowed| J[Linux / Shell / tmux]
+    I -->|Blocked| K[Tool Error]
+
+    F --> L[Web / Memory / Functions]
+    G --> M[workspace/temp]
+
+    J --> N[Tool Output]
+    L --> N
+    M --> N
+    K --> N
+
+    N --> O{Tool summarization enabled?}
+
+    O -->|No| P[Return Raw Tool Result]
+    O -->|Yes| Q[Summarizer Model]
+
+    Q -->|Success| R[Return Summarized Tool Result]
+    Q -->|Failure| S[Warn Human + Return Raw Tool Result]
+
+    P --> B
+    R --> B
+    S --> B
+
+    B --> H
+```
+````
+
+
+```mermaid
 flowchart LR
     U[User] --> M[LLM]
     M --> P[Adapt Parser]
