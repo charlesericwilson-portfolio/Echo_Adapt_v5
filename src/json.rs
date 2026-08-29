@@ -21,24 +21,55 @@ pub async fn handle_json_tool(
 
     let enabled_tools = &agent.config.json_tools.enabled;
 
-    // Memory tools
-    if let Some(tool_name) = extract_tool_name(json_content) {
-        if tool_name == "append_memory" || tool_name == "read_memory" {
-            let arguments = parse_arguments(json_content);
-            match handle_memory_tool(agent, &tool_name, &arguments).await {
-                Ok(result) => {
-                    let tool_content = format!("Tool output:\n{}", result);
-                    save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-                    agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
+        // Memory tools
+        if let Some(tool_name) = extract_tool_name(json_content) {
+            if tool_name == "append_memory" || tool_name == "read_memory" {
+                if !enabled_tools.contains(&tool_name) {
+                    let error_msg = format!(
+                        "JSON Tool error: Tool '{}' is not enabled in config",
+                        tool_name
+                    );
+
+                    agent.messages.push(serde_json::json!({
+                        "role": &agent.config.messages.tool_role_name,
+                        "content": error_msg
+                    }));
+
+                    return Ok(());
                 }
-                Err(e) => {
-                    let error_msg = format!("Memory Tool error: {}", e);
-                    agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": error_msg}));
+
+                let arguments = parse_arguments(json_content);
+
+                match handle_memory_tool(agent, &tool_name, &arguments).await {
+                    Ok(result) => {
+                        let tool_content = format!("Tool output:\n{}", result);
+
+                        save_chat_log_entry(
+                            &agent.home_dir,
+                            user_input,
+                            &tool_content,
+                            "assistant"
+                        ).await?;
+
+                        agent.messages.push(serde_json::json!({
+                            "role": &agent.config.messages.tool_role_name,
+                            "content": tool_content
+                        }));
+                    }
+
+                    Err(e) => {
+                        let error_msg = format!("Memory Tool error: {}", e);
+
+                        agent.messages.push(serde_json::json!({
+                            "role": &agent.config.messages.tool_role_name,
+                            "content": error_msg
+                        }));
+                    }
                 }
+
+                return Ok(());
             }
-            return Ok(());
         }
-    }
 
     // Regular tools (passes config)
     match handle_json_tool_call_str(json_content, agent.config.web_search.as_ref(), enabled_tools).await {
@@ -190,7 +221,16 @@ pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, 
 
     let max = max_chars.unwrap_or(8000);
     let truncated = if text_content.len() > max {
-        format!("{}...\n\n[Content truncated. Page was very long.]", &text_content[..max])
+        let mut end = max.min(text_content.len());
+
+        while end > 0 && !text_content.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        format!(
+            "{}...\n\n[Content truncated. Page was very long.]",
+            &text_content[..end]
+        )
     } else {
         text_content
     };
@@ -238,12 +278,23 @@ fn extract_tool_name(json_str: &str) -> Option<String> {
         if let Some(name) = parsed["name"].as_str() {
             return Some(name.to_string());
         }
+
         if let Some(function) = parsed["function"].as_object() {
             if let Some(name) = function["name"].as_str() {
                 return Some(name.to_string());
             }
         }
+
+        if let Some(function) = parsed["tool_calls"]
+            .get(0)
+            .and_then(|tool_call| tool_call["function"].as_object())
+        {
+            if let Some(name) = function["name"].as_str() {
+                return Some(name.to_string());
+            }
+        }
     }
+
     None
 }
 
