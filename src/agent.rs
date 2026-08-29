@@ -47,9 +47,15 @@ pub struct EchoAgent {
 impl EchoAgent {
     pub async fn new(config: Config) -> Result<Self> {
         let home_dir = match &config.paths.home_dir {
-            Some(path) if !path.trim().is_empty() => PathBuf::from(path),
-            _ => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/home/user/Documents")),
-        };
+    Some(path) if !path.trim().is_empty() => PathBuf::from(path),
+
+        _ => dirs::home_dir().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unable to determine the current user's home directory. \
+                Set paths.home_dir explicitly in config.toml."
+            )
+        })?,
+    };
 
         let context_path = if config.paths.context_file.starts_with('/') {
             PathBuf::from(&config.paths.context_file)
@@ -178,15 +184,27 @@ let trimmed_input = user_input.trim();
                 return Ok("[Triggered inactivity pause]".to_string());
             }
 
-            let response_text = reqwest::Client::new()
+            let response = reqwest::Client::new()
                 .post(&self.config.endpoint.url)
                 .json(&payload)
                 .send()
                 .await?
-                .json::<Value>()
-                .await?["choices"][0]["message"]["content"]
-                .as_str()
-                .unwrap_or("")
+                .error_for_status()?;
+
+            let response_json = response.json::<Value>().await?;
+
+            let response_text = response_json
+                .get("choices")
+                .and_then(|choices| choices.get(0))
+                .and_then(|choice| choice.get("message"))
+                .and_then(|message| message.get("content"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Model endpoint returned an unexpected response format: {}",
+                        response_json
+                    )
+                })?
                 .trim()
                 .to_string();
 
