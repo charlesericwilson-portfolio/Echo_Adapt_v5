@@ -11,9 +11,21 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
 
     println!("{}Echo: [SUMMARIZER] Summarizing tool output...{}",
              crate::agent::YELLOW, crate::agent::RESET_COLOR);
-    let tool_summarizer_prompt = tokio::fs::read_to_string(&config.prompts.summarizer)
-        .await
-        .expect("Failed to read summarizer prompt");
+    let tool_summarizer_prompt =
+    match tokio::fs::read_to_string(&config.prompts.summarizer).await {
+        Ok(prompt) => prompt,
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [SUMMARIZER ERROR] Failed to read prompt '{}': {}. Using original tool output.{}",
+                crate::agent::YELLOW,
+                config.prompts.summarizer,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(raw_output.to_string());
+        }
+    };
 
     let payload = json!({
         "model": &config.summarizer.model,
@@ -31,21 +43,78 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
         "max_tokens": 1500
     });
 
-    let response = reqwest::Client::new()
+    let response = match reqwest::Client::new()
         .post(&config.summarizer.url)
         .header("Content-Type", "application/json")
         .json(&payload)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
 
-    let body = response.text().await.unwrap_or_default();
-    let parsed: Value = serde_json::from_str(&body)?;
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [SUMMARIZER ERROR] Failed to contact summarizer endpoint: {}. Using original tool output.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
 
-    Ok(parsed["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("Summary failed.")
-        .trim()
-        .to_string())
+            return Ok(raw_output.to_string());
+        }
+    };
+
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [SUMMARIZER ERROR] Summarizer endpoint returned an error: {}. Using original tool output.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(raw_output.to_string());
+        }
+    };
+
+    let parsed: Value = match response.json().await {
+        Ok(parsed) => parsed,
+
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [SUMMARIZER ERROR] Invalid response from summarizer: {}. Using original tool output.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(raw_output.to_string());
+        }
+    };
+
+    let summary = match parsed
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+    {
+        Some(summary) if !summary.trim().is_empty() => summary.trim(),
+
+        _ => {
+            eprintln!(
+                "{}Echo: [SUMMARIZER ERROR] Summarizer returned no usable content. Using original tool output.{}",
+                crate::agent::YELLOW,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(raw_output.to_string());
+        }
+    };
+
+    Ok(summary.to_string())
 }
 
 pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Result<()> {
@@ -74,23 +143,75 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
     });
 
     // Call the model
-    let response = reqwest::Client::new()
+    let response = match reqwest::Client::new()
         .post(&config.endpoint.url)
         .json(&payload)
         .send()
-        .await?
-        .json::<Value>()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
 
-    let summary_text = response["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [CONTEXT SUMMARY ERROR] Failed to contact model endpoint: {}. Keeping existing context.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
 
-    if summary_text.is_empty() {
-        return Ok(());
-    }
+            return Ok(());
+        }
+    };
+
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [CONTEXT SUMMARY ERROR] Model endpoint returned an error: {}. Keeping existing context.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(());
+        }
+    };
+
+    let response_json: Value = match response.json().await {
+        Ok(json) => json,
+
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [CONTEXT SUMMARY ERROR] Invalid response from model endpoint: {}. Keeping existing context.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(());
+        }
+    };
+
+    let summary_text = match response_json
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+    {
+        Some(summary) if !summary.trim().is_empty() => summary.trim().to_string(),
+
+        _ => {
+            eprintln!(
+                "{}Echo: [CONTEXT SUMMARY ERROR] Model returned no usable summary. Keeping existing context.{}",
+                crate::agent::YELLOW,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(());
+        }
+    };
 
     // === FIX: Preserve the original system prompt (messages[0]) ===
     let system_prompt = messages[0].clone();
