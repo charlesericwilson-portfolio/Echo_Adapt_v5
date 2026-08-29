@@ -119,6 +119,7 @@ pub struct Config {
     #[serde(default)]
     pub json_tools: JsonToolsConfig,
     pub messages: MessagesConfig,
+    #[serde(default)]
     pub tool_tags: ToolTagsConfig,
 
 }
