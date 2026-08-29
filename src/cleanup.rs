@@ -8,7 +8,7 @@ use anyhow::Result;
 use std::fs;
 use serde_json::json;
 use crate::EchoAgent;
-use crate::log::save_chat_log_entry;
+use crate::log::save_chat_log_message;
 
 /// Check if the model response contains a `<cleanup>` or `<cleanup/>` tag.
 pub fn extract_cleanup(text: &str) -> Option<()> {
@@ -20,7 +20,7 @@ pub fn extract_cleanup(text: &str) -> Option<()> {
 }
 
 /// Execute the relative workspace cleanup and append the result to `agent.messages`.
-pub async fn handle_cleanup(agent: &mut EchoAgent, user_input: &str) -> Result<()> {
+pub async fn handle_cleanup(agent: &mut EchoAgent, _user_input: &str) -> Result<()> {
     // Dynamically get the current working directory where the process was executed
     let current_dir = std::env::current_dir().unwrap_or_else(|_| agent.home_dir.clone());
     let temp_dir = current_dir.join("workspace").join("temp");
@@ -60,8 +60,16 @@ pub async fn handle_cleanup(agent: &mut EchoAgent, user_input: &str) -> Result<(
 
     println!("🧹 Executed Cleanup: {}", output);
 
-    save_chat_log_entry(&agent.home_dir, user_input, &output, "cleanup_tool").await?;
-    agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": output}));
+    agent.messages.push(json!({
+        "role": &agent.config.messages.tool_role_name,
+        "content": &output
+    }));
+
+    save_chat_log_message(
+        &agent.home_dir,
+        &agent.config.messages.tool_role_name,
+        &output,
+    ).await?;
 
     Ok(())
 }

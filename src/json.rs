@@ -1,7 +1,7 @@
 use serde_json::Value;
 use anyhow::Result;
 use chrono::Local;
-use crate::log::save_chat_log_entry;
+use crate::log::save_chat_log_message;
 use std::time::Duration;
 use crate::memory::Memory;
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ use scraper::Selector;
 //  MAIN JSON TOOL HANDLER
 pub async fn handle_json_tool(
     agent: &mut crate::agent::EchoAgent,
-    user_input: &str,
+    _user_input: &str,
     _current_response: &str,
     json_content: &str,
 ) -> Result<()> {
@@ -32,8 +32,14 @@ pub async fn handle_json_tool(
 
                     agent.messages.push(serde_json::json!({
                         "role": &agent.config.messages.tool_role_name,
-                        "content": error_msg
+                        "content": &error_msg
                     }));
+
+                    save_chat_log_message(
+                        &agent.home_dir,
+                        &agent.config.messages.tool_role_name,
+                        &error_msg,
+                    ).await?;
 
                     return Ok(());
                 }
@@ -44,17 +50,16 @@ pub async fn handle_json_tool(
                     Ok(result) => {
                         let tool_content = format!("Tool output:\n{}", result);
 
-                        save_chat_log_entry(
-                            &agent.home_dir,
-                            user_input,
-                            &tool_content,
-                            "assistant"
-                        ).await?;
-
                         agent.messages.push(serde_json::json!({
                             "role": &agent.config.messages.tool_role_name,
-                            "content": tool_content
+                            "content": &tool_content
                         }));
+
+                        save_chat_log_message(
+                            &agent.home_dir,
+                            &agent.config.messages.tool_role_name,
+                            &tool_content,
+                        ).await?;
                     }
 
                     Err(e) => {
@@ -62,8 +67,14 @@ pub async fn handle_json_tool(
 
                         agent.messages.push(serde_json::json!({
                             "role": &agent.config.messages.tool_role_name,
-                            "content": error_msg
+                            "content": &error_msg
                         }));
+
+                        save_chat_log_message(
+                            &agent.home_dir,
+                            &agent.config.messages.tool_role_name,
+                            &error_msg,
+                        ).await?;
                     }
                 }
 
@@ -80,12 +91,31 @@ pub async fn handle_json_tool(
             }
 
             let tool_content = format!("Tool output:\n{}", result);
-            save_chat_log_entry(&agent.home_dir, user_input, &tool_content, "assistant").await?;
-            agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
+
+            agent.messages.push(serde_json::json!({
+                "role": &agent.config.messages.tool_role_name,
+                "content": &tool_content
+            }));
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                &tool_content,
+            ).await?;
         }
         Err(e) => {
             let error_msg = format!("JSON Tool error: {}", e);
-            agent.messages.push(serde_json::json!({"role": &agent.config.messages.tool_role_name, "content": error_msg}));
+
+            agent.messages.push(serde_json::json!({
+                "role": &agent.config.messages.tool_role_name,
+                "content": &error_msg
+            }));
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                &error_msg,
+            ).await?;
         }
     }
 

@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
+use crate::log::save_chat_log_message;
 
 fn tmux_session_name(name: &str) -> String {
     let safe_name: String = name
@@ -288,14 +289,37 @@ pub async fn handle_session_command(
         println!("{}[Session tool executed — Echo will summarize]{}",
                  crate::agent::YELLOW, crate::agent::RESET_COLOR);
 
-        agent.messages.push(json!({"role": "assistant", "content": format!("Executed command in session '{}'", session_name)}));
-        agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
+        agent.messages.push(json!({
+            "role": "assistant",
+            "content": format!("Executed command in session '{}'", session_name)
+        }));
+
+        agent.messages.push(json!({
+            "role": &agent.config.messages.tool_role_name,
+            "content": &tool_content
+        }));
+
+        save_chat_log_message(
+            &agent.home_dir,
+            &agent.config.messages.tool_role_name,
+            &tool_content,
+        ).await?;
 
     } else {
         println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
         let tool_content = format!("Session '{}' has been terminated.", session_name);
-        agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
+
+        agent.messages.push(json!({
+            "role": &agent.config.messages.tool_role_name,
+            "content": &tool_content
+        }));
+
+        save_chat_log_message(
+            &agent.home_dir,
+            &agent.config.messages.tool_role_name,
+            &tool_content,
+        ).await?;
     }
 
     Ok(())

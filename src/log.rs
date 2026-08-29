@@ -67,3 +67,46 @@ pub async fn save_chat_log_entry(
 
     Ok(())
 }
+
+pub async fn save_chat_log_message(
+    log_dir: &PathBuf,
+    role: &str,
+    content: &str,
+) -> Result<()> {
+    if content.trim().is_empty() {
+        return Ok(());
+    }
+
+    tokio::fs::create_dir_all(log_dir).await?;
+
+    let file_path = log_dir.join("echo_chat.jsonl");
+
+    let log_entry = LogEntry {
+        messages: vec![
+            Message {
+                role: role.to_string(),
+                content: content.trim().to_string(),
+            }
+        ],
+    };
+
+    let log_line = serde_json::to_string(&log_entry)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize log: {}", e))?;
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&file_path)
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to open {}: {}",
+                file_path.display(),
+                e
+            )
+        })?;
+
+    writeln!(file, "{}", log_line)
+        .map_err(|e| anyhow::anyhow!("Failed to write log: {}", e))?;
+
+    Ok(())
+}

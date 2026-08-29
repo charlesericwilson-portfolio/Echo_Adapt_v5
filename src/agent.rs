@@ -23,11 +23,11 @@ use crate::config::Config;
 use crate::db::ToolDatabase;
 use crate::summary::summarize_context;
 use crate::sessions::{extract_session_command, extract_end_command, clean_up_sessions};
-use crate::log::save_chat_log_entry;
 use crate::commands::extract_command;
 use crate::json::extract_json_tool;
 use crate::cleanup::{extract_cleanup, handle_cleanup};
 use crate::hotkeys::{self, InputAction};
+use crate::log::{save_chat_log_entry, save_chat_log_message};
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -152,7 +152,17 @@ let trimmed_input = user_input.trim();
             }
 
             self.max_turns_counter = 0;
-            self.messages.push(json!({"role": "user", "content": trimmed_input}));
+
+            self.messages.push(json!({
+                "role": "user",
+                "content": trimmed_input
+            }));
+
+            save_chat_log_message(
+                &self.home_dir,
+                "user",
+                trimmed_input,
+            ).await?;
 
             let final_response = self.process_turn(trimmed_input).await?;
             println!("{}Echo:\n{}\n{}", LIGHT_BLUE, final_response.trim(), RESET_COLOR);
@@ -207,6 +217,12 @@ let trimmed_input = user_input.trim();
                 })?
                 .trim()
                 .to_string();
+
+            save_chat_log_message(
+                &self.home_dir,
+                "assistant",
+                &response_text,
+            ).await?;
 
             let tags = self.config.tool_tags.clone();
 
@@ -281,7 +297,6 @@ let trimmed_input = user_input.trim();
 
             // 6. Final Assistant Response
             } else {
-                save_chat_log_entry(&self.home_dir, user_input, &response_text, "assistant").await?;
                 self.messages.push(json!({"role": "assistant", "content": &response_text}));
 
                 let total_chars: usize = self.messages.iter()

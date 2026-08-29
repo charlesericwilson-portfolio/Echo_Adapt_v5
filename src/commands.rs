@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
+use crate::log::save_chat_log_message;
 
 /// Extracts a command dynamically based on configured tags
 pub fn extract_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
@@ -70,8 +71,18 @@ pub async fn handle_command(
         command.trim(), stdout.trim(), stderr.trim()
     );
 
-    // Only store in history, DO NOT print raw output ===
-    agent.messages.push(json!({"role": &agent.config.messages.tool_role_name, "content": tool_content}));
+    // Store in live model context.
+    agent.messages.push(json!({
+        "role": &agent.config.messages.tool_role_name,
+        "content": &tool_content
+    }));
+
+    // Store the same tool result in the persistent transcript.
+    save_chat_log_message(
+        &agent.home_dir,
+        &agent.config.messages.tool_role_name,
+        &tool_content,
+    ).await?;
 
     // Log tool
     let summary = if tool_content.len() > 500 {
