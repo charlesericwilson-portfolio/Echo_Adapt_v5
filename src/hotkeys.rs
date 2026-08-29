@@ -9,19 +9,87 @@ pub enum InputAction {
     Exit,
 }
 
+
 pub fn spawn_new_adapt_tab() -> io::Result<()> {
     let exe = std::env::current_exe()?;
     let cwd = std::env::current_dir()?;
 
-    Command::new("konsole")
-        .arg("--new-tab")
-        .arg("--workdir")
-        .arg(cwd)
-        .arg("-e")
-        .arg(exe)
-        .spawn()?;
+    // Try common Linux terminal emulators in order.
+    let terminals = [
+        "konsole",
+        "gnome-terminal",
+        "kitty",
+        "alacritty",
+        "xfce4-terminal",
+        "xterm",
+    ];
 
-    Ok(())
+    for terminal in terminals {
+        let available = Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {} >/dev/null 2>&1", terminal))
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+
+        if !available {
+            continue;
+        }
+
+        let result = match terminal {
+            "konsole" => Command::new(terminal)
+                .arg("--new-tab")
+                .arg("--workdir")
+                .arg(&cwd)
+                .arg("-e")
+                .arg(&exe)
+                .spawn(),
+
+            "gnome-terminal" => Command::new(terminal)
+                .arg("--working-directory")
+                .arg(&cwd)
+                .arg("--")
+                .arg(&exe)
+                .spawn(),
+
+            "kitty" => Command::new(terminal)
+                .arg("--directory")
+                .arg(&cwd)
+                .arg(&exe)
+                .spawn(),
+
+            "alacritty" => Command::new(terminal)
+                .arg("--working-directory")
+                .arg(&cwd)
+                .arg("-e")
+                .arg(&exe)
+                .spawn(),
+
+            "xfce4-terminal" => Command::new(terminal)
+                .arg("--working-directory")
+                .arg(&cwd)
+                .arg("-x")
+                .arg(&exe)
+                .spawn(),
+
+            "xterm" => Command::new(terminal)
+                .arg("-e")
+                .arg(&exe)
+                .current_dir(&cwd)
+                .spawn(),
+
+            _ => unreachable!(),
+        };
+
+        if result.is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "No supported terminal emulator found",
+    ))
 }
 
 pub fn read_user_input() -> io::Result<InputAction> {
