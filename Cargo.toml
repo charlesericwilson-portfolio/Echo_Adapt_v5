@@ -1,7 +1,7 @@
 [package]
 name = "Adapt_v5"
-version = "0.1.0"
-edition = "2021"
+version = "5.0.0"
+edition = "2024"
 
 
 [dependencies]
