@@ -1,5 +1,5 @@
 # Echo Adapt v5
-
+###**Fixing it right now as we speak do not clone it**
 **A local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, structured functions, memory, and controlled access to the machine they are running on.**
 
 > **Current version:** Adapt v5  
