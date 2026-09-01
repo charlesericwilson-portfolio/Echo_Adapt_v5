@@ -1221,4 +1221,11 @@ Check the repository license before redistributing or incorporating Adapt into a
 This project is experimental software.
 
 Run AI-controlled tools with permissions appropriate to the level of risk you are willing to accept.
-````
+
+Recent test run for a simple research project
+### Autonomous Workflow
+
+![Echo Adapt autonomous workflow](screenshots/Research-1.png)
+
+
+![Echo Adapt persistent terminal session](screenshots/Research-2.png)
