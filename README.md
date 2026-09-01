@@ -626,7 +626,7 @@ Possible local backends include:
 
 OpenAI-compatible cloud providers may also work when their request and response behavior matches the expected Chat Completions format.
 
-There is a Grok branch for this project but usually runs behind this one but it works and the model can run tools on your PC. Anthropic or Gemini APIs are **not currently handled directly by this branch**.
+There is a Grok branch for this project but usually runs behind this one but it works and the model can run tools on your PC. Anthropic or Gemini APIs are **not currently handled directly by this branch**. Grok branch — an experimental proof-of-concept confirming Adapt's tool execution works against a cloud provider, not a separate long-term codebase. The JSON push message handling differs per-provider (each has its own envelope shape), and the plan is to fold this into main as config-driven provider profiles rather than maintain parallel branches.
 
 ---
 
