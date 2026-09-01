@@ -1,5 +1,5 @@
 # Echo Adapt v5
-###**Fixing it right now as we speak do not clone it**
+###**Fixed clone away**
 **A local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, structured functions, memory, and controlled access to the machine they are running on.**
 
 > **Current version:** Adapt v5  
@@ -1211,7 +1211,7 @@ Again:
 ### Echo Model
 
 [Echo Instroder v2.2](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
-Model on Hugging Face is currently down replacement is in training. Use any instruct/coder model to try it. Qwen seems to work the best am currently testing GPT-OSS.
+
 ---
 
 # License / Use
