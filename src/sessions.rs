@@ -142,44 +142,109 @@ pub async fn execute_in_session(
     let marker_start = format!("===ECHO_START_{}===", timestamp);
     let marker_end = format!("===ECHO_END_{}===", timestamp);
 
+    // 1. Send START marker as its own command.
     Command::new("tmux")
-        .args(["send-keys", "-t", &tmux_name, &format!("echo '{}'", marker_start), "Enter"])
-        .status().await?;
+        .args([
+            "send-keys",
+            "-t",
+            &tmux_name,
+            &format!("echo '{}'", marker_start),
+            "Enter",
+        ])
+        .status()
+        .await?;
 
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-    let chained_command = format!("{}; echo '{}'", command.trim(), marker_end);
-
+    // 2. Send the actual payload as its own command.
     Command::new("tmux")
-        .args(["send-keys", "-t", &tmux_name, &chained_command, "Enter"])
-        .status().await?;
+        .args([
+            "send-keys",
+            "-t",
+            &tmux_name,
+            command.trim(),
+            "Enter",
+        ])
+        .status()
+        .await?;
 
-    println!("{}[Session] Waiting for command to finish...{}", crate::agent::YELLOW, crate::agent::RESET_COLOR);
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // 3. Send END marker as its own command.
+    //
+    // This intentionally preserves interactive-session behavior
+    // such as msfconsole. Foreground commands that consume stdin
+    // may prevent this marker from executing; those should use
+    // the normal command tool instead of session mode.
+    Command::new("tmux")
+        .args([
+            "send-keys",
+            "-t",
+            &tmux_name,
+            &format!("echo '{}'", marker_end),
+            "Enter",
+        ])
+        .status()
+        .await?;
+
+    println!(
+        "{}[Session] Waiting for command to finish...{}",
+        crate::agent::YELLOW,
+        crate::agent::RESET_COLOR
+    );
 
     let start_time = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(300);
 
     loop {
         if start_time.elapsed() > timeout {
-            return Err(anyhow::anyhow!("Timeout waiting for markers in session {}", name));
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for markers in session {}",
+                name
+            ));
         }
 
         let output = Command::new("tmux")
-            .args(["capture-pane", "-p", "-S", "-", "-t", &tmux_name])
-            .output().await?;
+            .args([
+                "capture-pane",
+                "-p",
+                "-S",
+                "-",
+                "-t",
+                &tmux_name,
+            ])
+            .output()
+            .await?;
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        let lines: Vec<&str> = raw.lines().collect();
 
-        if let (Some(start_idx), Some(end_idx)) = (raw.rfind(&marker_start), raw.rfind(&marker_end)) {
-            if end_idx > start_idx {
-                let captured = raw[start_idx + marker_start.len()..end_idx].trim().to_string();
-                if !captured.is_empty() || captured.contains('\n') {
-                    return Ok(captured);
-                }
+        // Find the newest ACTUAL end marker.
+        // Exact-line matching prevents the typed
+        // `echo '===ECHO_END...==='` command from counting.
+        if let Some(end_idx) = lines
+            .iter()
+            .rposition(|line| line.trim() == marker_end)
+        {
+            // Starting from that END marker, walk backward and
+            // find the newest ACTUAL START marker before it.
+            if let Some(start_idx) = lines[..end_idx]
+                .iter()
+                .rposition(|line| line.trim() == marker_start)
+            {
+                let captured = lines[start_idx + 1..end_idx]
+                    .join("\n")
+                    .trim()
+                    .to_string();
+
+                return Ok(captured);
             }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(
+            tokio::time::Duration::from_millis(500)
+        )
+        .await;
     }
 }
 
