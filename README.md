@@ -1222,10 +1222,12 @@ This project is experimental software.
 
 Run AI-controlled tools with permissions appropriate to the level of risk you are willing to accept.
 
-Recent test run for a simple research project
+Recent test run for a simple research project I asked for the top ten dog names and specifically didn't give it the proper working directory and requested the file in it's .md format but it can give it to you in any format .docx or PDF. The final atifact is at the end 
 ### Autonomous Workflow
 
 ![Echo Adapt autonomous workflow](screenshots/Research-1.png)
 
 
 ![Echo Adapt persistent terminal session](screenshots/Research-2.png)
+
+[Artifact](dog_names.md)
