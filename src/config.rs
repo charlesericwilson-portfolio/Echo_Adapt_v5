@@ -81,6 +81,12 @@ pub struct SummarizerConfig {
     pub enabled: bool,
     pub url: String,
     pub model: String,
+    #[serde(default = "default_max_raw_output_chars")]
+    pub max_raw_output_chars: usize,
+}
+
+fn default_max_raw_output_chars() -> usize {
+    6000
 }
 
 #[derive(Debug, Deserialize)]

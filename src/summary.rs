@@ -9,6 +9,10 @@ pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<Strin
         return Ok(raw_output.to_string());   // return original
     }
 
+    if raw_output.chars().count() <= config.summarizer.max_raw_output_chars {
+        return Ok(raw_output.to_string());
+    }
+
     println!("{}Echo: [SUMMARIZER] Summarizing tool output...{}",
              crate::agent::YELLOW, crate::agent::RESET_COLOR);
     let tool_summarizer_prompt =

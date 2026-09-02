@@ -3,6 +3,7 @@ use serde_json::json;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
 use crate::log::save_chat_log_message;
+use crate::summary::summarize_output;
 
 /// Extracts a command dynamically based on configured tags
 pub fn extract_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
@@ -66,35 +67,42 @@ pub async fn handle_command(
     let stdout = String::from_utf8_lossy(&output_cmd.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output_cmd.stderr).to_string();
 
-    let tool_content = format!(
-        "Tool output from command '{}':\nSTDOUT:\n{}\nSTDERR:\n{}",
-        command.trim(), stdout.trim(), stderr.trim()
+    let raw_tool_content = format!(
+    "Tool output from command '{}':\nSTDOUT:\n{}\nSTDERR:\n{}",
+    command.trim(),
+    stdout.trim(),
+    stderr.trim()
     );
+
+    let model_tool_content = summarize_output(
+        &raw_tool_content,
+        &agent.config
+    ).await?;
 
     // Store in live model context.
     agent.messages.push(json!({
         "role": &agent.config.messages.tool_role_name,
-        "content": &tool_content
+        "content": &model_tool_content
     }));
 
     // Store the same tool result in the persistent transcript.
     save_chat_log_message(
         &agent.home_dir,
         &agent.config.messages.tool_role_name,
-        &tool_content,
+        &raw_tool_content,
     ).await?;
 
     // Log tool
-    let summary = if tool_content.len() > 500 {
-        let mut end = 497.min(tool_content.len());
+    let summary = if raw_tool_content.len() > 500 {
+        let mut end = 497.min(raw_tool_content.len());
 
-        while end > 0 && !tool_content.is_char_boundary(end) {
+        while end > 0 && !raw_tool_content.is_char_boundary(end) {
             end -= 1;
         }
 
-        format!("{}...", &tool_content[..end])
+        format!("{}...", &raw_tool_content[..end])
     } else {
-        tool_content.clone()
+        raw_tool_content.clone()
     };
 
     if let Err(e) = agent.db.log_tool_call("command", command, &summary) {

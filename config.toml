@@ -8,6 +8,7 @@ max_tokens = 2048
 enabled = true
 url = "http://localhost:8082/v1/chat/completions"
 model = "summarizer"
+max_raw_output_chars = 6000
 
 [embeddings]
 url = "http://localhost:8080/v1/chat/completions"  # or same as main if using chat for embeddings
@@ -15,7 +16,7 @@ model = "Echo"  # or a dedicated embedding model
 
 [web_search]
 url = "https://api.tavily.com/search"
-api_key = ""
+api_key = "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"
 
 [paths]
 home_dir = ""
