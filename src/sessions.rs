@@ -5,12 +5,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
 use serde_json::json;
-use std::time::Instant;
 
+use crate::supervisor::{SessionEvent, SessionState};
 use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
 use crate::config::ToolTagsConfig;
 use crate::log::save_chat_log_message;
+
+const SESSION_FOREGROUND_WAIT_MS: u64 = 2_000;
+const SESSION_POLL_INTERVAL_MS: u64 = 500;
 
 fn tmux_session_name(name: &str) -> String {
     let safe_name: String = name
@@ -29,7 +32,7 @@ fn tmux_session_name(name: &str) -> String {
 
 pub async fn start_or_reuse_session(
     home_dir: PathBuf,
-    active_sessions: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
     name: &str,
     _command: &str,
 ) -> Result<()> {
@@ -38,12 +41,8 @@ pub async fn start_or_reuse_session(
 
         sessions
             .entry(name.to_string())
-            .and_modify(|(_, last_used)| {
-                *last_used = Instant::now();
-            })
-            .or_insert_with(|| {
-                (String::new(), Instant::now())
-            });
+            .and_modify(|state| state.touch())
+            .or_insert_with(SessionState::new);
     }
 
     let tmux_name = tmux_session_name(name);
@@ -130,17 +129,60 @@ pub fn extract_end_command(response_text: &str, tags: &ToolTagsConfig) -> Option
     None
 }
 
+pub enum SessionExecution {
+    Completed(String),
+    Background(i64),
+}
+
+pub async fn handle_completed_session_event(
+    agent: &mut crate::agent::EchoAgent,
+    event: SessionEvent,
+) -> Result<()> {
+    let summary = match summarize_output(&event.output, &agent.config).await {
+        Ok(s) => s,
+        Err(e) => format!("(Summarizer failed: {})", e),
+    };
+
+    let tool_content = format!(
+        "Background SESSION '{}' completed.\nMarker: {}\nOutput summary: {}",
+        event.session_name,
+        event.marker_id,
+        summary
+    );
+
+    agent.messages.push(json!({
+        "role": &agent.config.messages.tool_role_name,
+        "content": &tool_content
+    }));
+
+    save_chat_log_message(
+        &agent.home_dir,
+        &agent.config.messages.tool_role_name,
+        &tool_content,
+    ).await?;
+
+    Ok(())
+}
+
 pub async fn execute_in_session(
     _home_dir: PathBuf,
-    _active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
+    active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
     name: &str,
     command: String,
-) -> Result<String> {
+) -> Result<SessionExecution> {
     let tmux_name = tmux_session_name(name);
 
-    let timestamp = chrono::Local::now().timestamp();
-    let marker_start = format!("===ECHO_START_{}===", timestamp);
-    let marker_end = format!("===ECHO_END_{}===", timestamp);
+    let marker_id = chrono::Local::now().timestamp_millis();
+    let marker_start = format!("===ECHO_START_{}===", marker_id);
+    let marker_end = format!("===ECHO_END_{}===", marker_id);
+
+    {
+        let mut sessions = active_sessions.lock().await;
+
+        if let Some(state) = sessions.get_mut(name) {
+            state.mark_running(marker_id);
+        }
+    }
 
     // 1. Send START marker as its own command.
     Command::new("tmux")
@@ -193,17 +235,9 @@ pub async fn execute_in_session(
         crate::agent::RESET_COLOR
     );
 
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(300);
+    let foreground_start = std::time::Instant::now();
 
     loop {
-        if start_time.elapsed() > timeout {
-            return Err(anyhow::anyhow!(
-                "Timeout waiting for markers in session {}",
-                name
-            ));
-        }
-
         let output = Command::new("tmux")
             .args([
                 "capture-pane",
@@ -219,15 +253,11 @@ pub async fn execute_in_session(
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
         let lines: Vec<&str> = raw.lines().collect();
 
-        // Find the newest ACTUAL end marker.
-        // Exact-line matching prevents the typed
-        // `echo '===ECHO_END...==='` command from counting.
+        // Command finished during the foreground window.
         if let Some(end_idx) = lines
             .iter()
             .rposition(|line| line.trim() == marker_end)
         {
-            // Starting from that END marker, walk backward and
-            // find the newest ACTUAL START marker before it.
             if let Some(start_idx) = lines[..end_idx]
                 .iter()
                 .rposition(|line| line.trim() == marker_start)
@@ -237,20 +267,120 @@ pub async fn execute_in_session(
                     .trim()
                     .to_string();
 
-                return Ok(captured);
+                // This command is no longer running.
+                {
+                    let mut sessions = active_sessions.lock().await;
+
+                    if let Some(state) = sessions.get_mut(name) {
+                        state.running_marker = None;
+                        state.touch();
+                    }
+                }
+
+                return Ok(SessionExecution::Completed(captured));
             }
         }
 
-        tokio::time::sleep(
-            tokio::time::Duration::from_millis(500)
-        )
-        .await;
+        // Give short commands a chance to complete normally.
+        if foreground_start.elapsed()
+            < std::time::Duration::from_millis(SESSION_FOREGROUND_WAIT_MS)
+        {
+            tokio::time::sleep(
+                tokio::time::Duration::from_millis(SESSION_POLL_INTERVAL_MS)
+            )
+            .await;
+
+            continue;
+        }
+
+        // The command exceeded the foreground window.
+        // Clone everything the background task must own.
+        let sessions = Arc::clone(active_sessions);
+        let background_name = name.to_string();
+        let background_tmux_name = tmux_name.clone();
+        let background_marker_start = marker_start.clone();
+        let background_marker_end = marker_end.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let output = Command::new("tmux")
+                    .args([
+                        "capture-pane",
+                        "-p",
+                        "-S",
+                        "-",
+                        "-t",
+                        &background_tmux_name,
+                    ])
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(output) => {
+                        let raw =
+                            String::from_utf8_lossy(&output.stdout).to_string();
+
+                        let lines: Vec<&str> = raw.lines().collect();
+
+                        if let Some(end_idx) = lines
+                            .iter()
+                            .rposition(|line| line.trim() == background_marker_end)
+                        {
+                            if let Some(start_idx) = lines[..end_idx]
+                                .iter()
+                                .rposition(|line| {
+                                    line.trim() == background_marker_start
+                                })
+                            {
+                                let captured = lines[start_idx + 1..end_idx]
+                                    .join("\n")
+                                    .trim()
+                                    .to_string();
+
+                                let mut session_map = sessions.lock().await;
+
+                                if let Some(state) =
+                                    session_map.get_mut(&background_name)
+                                {
+                                    state.push_completed(
+                                        &background_name,
+                                        marker_id,
+                                        captured,
+                                    );
+                                }
+
+                                break;
+                            }
+                        }
+                    }
+
+                    Err(error) => {
+                        eprintln!(
+                            "[Session supervisor] Failed to capture session '{}': {}",
+                            background_name,
+                            error
+                        );
+
+                        break;
+                    }
+                }
+
+                tokio::time::sleep(
+                    tokio::time::Duration::from_millis(
+                        SESSION_POLL_INTERVAL_MS
+                    )
+                )
+                .await;
+            }
+        });
+
+        return Ok(SessionExecution::Background(marker_id));
     }
 }
 
 pub async fn end_session(
     _home_dir: PathBuf,
-    active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
+    active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
     name: &str,
 ) -> Result<()> {
     let mut sessions = active_sessions.lock().await;
@@ -267,7 +397,7 @@ pub async fn end_session(
 }
 
 pub async fn start_session_cleanup_task(
-    active_sessions: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
 ) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
@@ -281,7 +411,7 @@ pub async fn start_session_cleanup_task(
 
             let to_remove: Vec<String> = sessions
                 .iter()
-                .filter(|(_, (_, last_used))| now.duration_since(*last_used) > timeout)
+                .filter(|(_, state)| now.duration_since(state.last_used) > timeout)
                 .map(|(name, _)| name.clone())
                 .collect();
 
@@ -312,7 +442,7 @@ pub async fn start_session_cleanup_task(
 /// to existing tmux sessions. Inactive sessions are handled separately by
 /// the session cleanup task and expire after the configured inactivity period.
 pub async fn clean_up_sessions(
-    _active_sessions: &Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>
+    _active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>
 ) -> Result<()> {
     Ok(())
 }
@@ -325,50 +455,141 @@ pub async fn handle_session_command(
 ) -> Result<()> {
     if let Some(cmd) = command {
         if let Err(e) = is_command_safe(cmd, &agent.config) {
-            println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
-            agent.messages.push(json!({"role": "assistant", "content": format!("Safety block: {}", e)}));
+            println!(
+                "{}Safety block: {}{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            agent.messages.push(json!({
+                "role": "assistant",
+                "content": format!("Safety block: {}", e)
+            }));
+
             return Ok(());
         }
 
-        start_or_reuse_session(agent.home_dir.clone(), &agent.active_sessions, session_name, cmd).await?;
+        // Do not send another command into a session
+        // that already has background work running.
+        {
+            let sessions = agent.active_sessions.lock().await;
 
-        let raw_output = execute_in_session(
+            if let Some(state) = sessions.get(session_name) {
+                if state.is_running() {
+                    drop(sessions);
+
+                    let tool_content = format!(
+                        "SESSION '{}' already has a command running in the background. \
+                        Wait for its completion or use a different uniquely named session \
+                        for parallel work.",
+                        session_name
+                    );
+
+                    println!(
+                        "{}[Session '{}' already has background work running]{}",
+                        crate::agent::YELLOW,
+                        session_name,
+                        crate::agent::RESET_COLOR
+                    );
+
+                    agent.messages.push(json!({
+                        "role": &agent.config.messages.tool_role_name,
+                        "content": &tool_content
+                    }));
+
+                    save_chat_log_message(
+                        &agent.home_dir,
+                        &agent.config.messages.tool_role_name,
+                        &tool_content,
+                    ).await?;
+
+                    return Ok(());
+                }
+            }
+        }
+
+        start_or_reuse_session(
+            agent.home_dir.clone(),
+            &agent.active_sessions,
+            session_name,
+            cmd
+        ).await?;
+
+        let execution = execute_in_session(
             agent.home_dir.clone(),
             &agent.active_sessions,
             session_name,
             cmd.to_string()
         ).await?;
 
-        let summary = match summarize_output(&raw_output, &agent.config).await {
-            Ok(s) => s,
-            Err(e) => format!("(Summarizer failed: {})", e),
-        };
+        match execution {
+            SessionExecution::Completed(output) => {
+                let summary = match summarize_output(&output, &agent.config).await {
+                    Ok(s) => s,
+                    Err(e) => format!("(Summarizer failed: {})", e),
+                };
 
-        agent.db.log_tool_call(session_name, cmd, &summary)?;
+                agent.db.log_tool_call(session_name, cmd, &summary)?;
 
-        let tool_content = format!(
-            "Tool output from SESSION '{}':\nRaw summary: {}",
-            session_name, summary
-        );
+                let tool_content = format!(
+                    "Tool output from SESSION '{}':\nRaw summary: {}",
+                    session_name, summary
+                );
 
-        println!("{}[Session tool executed — Echo will summarize]{}",
-                 crate::agent::YELLOW, crate::agent::RESET_COLOR);
+                println!(
+                    "{}[Session tool executed — Echo will summarize]{}",
+                    crate::agent::YELLOW,
+                    crate::agent::RESET_COLOR
+                );
 
-        agent.messages.push(json!({
-            "role": "assistant",
-            "content": format!("Executed command in session '{}'", session_name)
-        }));
+                agent.messages.push(json!({
+                    "role": "assistant",
+                    "content": format!("Executed command in session '{}'", session_name)
+                }));
 
-        agent.messages.push(json!({
-            "role": &agent.config.messages.tool_role_name,
-            "content": &tool_content
-        }));
+                agent.messages.push(json!({
+                    "role": &agent.config.messages.tool_role_name,
+                    "content": &tool_content
+                }));
 
-        save_chat_log_message(
-            &agent.home_dir,
-            &agent.config.messages.tool_role_name,
-            &tool_content,
-        ).await?;
+                save_chat_log_message(
+                    &agent.home_dir,
+                    &agent.config.messages.tool_role_name,
+                    &tool_content,
+                ).await?;
+            }
+
+            SessionExecution::Background(marker_id) => {
+                let tool_content = format!(
+                    "SESSION '{}' is still running in the background.\n\
+                    Marker: {}\n\
+                    Continue reasoning from the current task. \
+                    Do not repeat this command while this session is still running.",
+                    session_name,
+                    marker_id
+                );
+
+                println!(
+                    "{}[Session '{}' continuing in background, marker {}]{}",
+                    crate::agent::YELLOW,
+                    session_name,
+                    marker_id,
+                    crate::agent::RESET_COLOR
+                );
+
+                agent.messages.push(json!({
+                    "role": &agent.config.messages.tool_role_name,
+                    "content": &tool_content
+                }));
+
+                save_chat_log_message(
+                    &agent.home_dir,
+                    &agent.config.messages.tool_role_name,
+                    &tool_content,
+                ).await?;
+            }
+        }
 
     } else {
         println!("{}Echo: Ending session {}{}", crate::agent::YELLOW, session_name, crate::agent::RESET_COLOR);

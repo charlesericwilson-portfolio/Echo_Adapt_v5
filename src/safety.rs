@@ -85,6 +85,7 @@ mod tests {
                 url: "http://localhost:8082".to_string(),
                 model: "summarizer".to_string(),
                 enabled: true,
+                max_raw_output_chars: 6000,
             },
             embeddings: EmbeddingsConfig {
                 url: "http://localhost:8080".to_string(),

@@ -18,11 +18,12 @@ use std::collections::HashMap;
 use dirs_next as dirs;
 use std::sync::atomic::Ordering;
 
+use crate::supervisor::SessionState;
 use crate::sessions::start_session_cleanup_task;
 use crate::config::Config;
 use crate::db::ToolDatabase;
 use crate::summary::summarize_context;
-use crate::sessions::{extract_session_command, extract_end_command, clean_up_sessions};
+use crate::sessions::{extract_session_command, extract_end_command, clean_up_sessions, handle_completed_session_event};
 use crate::commands::extract_command;
 use crate::json::extract_json_tool;
 use crate::cleanup::{extract_cleanup, handle_cleanup};
@@ -40,7 +41,7 @@ pub struct EchoAgent {
     pub db: ToolDatabase,
     pub home_dir: PathBuf,
     pub max_turns_counter: u32,
-    pub active_sessions: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
+    pub active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -175,6 +176,23 @@ let trimmed_input = user_input.trim();
     #[allow(unused_assignments)]
     async fn process_turn(&mut self, user_input: &str) -> Result<String> {
         loop {
+
+            let mut completed_events = Vec::new();
+
+            {
+                let mut sessions = self.active_sessions.lock().await;
+
+                for state in sessions.values_mut() {
+                    while let Some(event) = state.take_pending() {
+                        completed_events.push(event);
+                    }
+                }
+            }
+
+            for event in completed_events {
+                handle_completed_session_event(self, event).await?;
+            }
+
             let payload = json!({
                 "model": self.config.endpoint.model,
                 "messages": &self.messages,

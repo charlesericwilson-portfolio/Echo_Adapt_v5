@@ -20,6 +20,7 @@ mod agent;
 mod memory;
 mod cleanup;
 mod hotkeys;
+mod supervisor;
 
 use agent::EchoAgent;
 
