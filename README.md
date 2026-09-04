@@ -1,6 +1,6 @@
 # Echo Adapt v5
 
-### **Fixed clone away**
+### **New features asynchronous background sessions handling**
 
 **A local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, asynchronous session supervision, structured functions, memory, and controlled access to the machine they are running on.**
 
