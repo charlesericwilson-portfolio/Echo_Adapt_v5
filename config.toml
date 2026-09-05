@@ -1,3 +1,20 @@
+# Model provider protocol:
+#
+#   "local"
+#       Default. Local OpenAI-compatible endpoint.
+#       Examples: llama.cpp, vLLM, SGLang, LM Studio.
+#
+#   "openai_compatible"
+#       Remote OpenAI-compatible Chat Completions endpoint.
+#       Examples: Google Gemini, Anthropic Claude using chat/completions endpoint, DeepSeek,
+#       and other compatible services.
+#
+#   "grok"
+#       xAI Grok Responses API.
+#
+# Default: "local"
+provider = "local"
+
 [endpoint]
 provider = "local"
 url = "http://localhost:8080/v1/chat/completions"
