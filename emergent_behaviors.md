@@ -1,0 +1,1 @@
+Temporal source validation: Research workflows frequently invoke the datetime tool before evaluating source freshness. This behavior was not explicitly specified in the dataset-generation instructions and appears to have arisen in synthetic teacher trajectories before transferring through SFT.
