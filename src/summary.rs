@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use anyhow::Result;
 use crate::config::Config;
+use crate::providers;
 
 pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<String> {
     if !config.summarizer.enabled {
@@ -139,20 +140,38 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
     // Add the recent conversation history (skip the original system prompt)
     summary_messages.extend(messages.iter().skip(1).cloned());
 
-    let payload = json!({
-        "model": &config.endpoint.model,
-        "messages": summary_messages,
-        "temperature": 0.3,
-        "max_tokens": 1024
-    });
+    let payload = match providers::build_payload_with_settings(
+        &config.endpoint,
+        &summary_messages,
+        0.3,
+        1024,
+    ) {
+        Ok(payload) => payload,
+
+        Err(e) => {
+            eprintln!(
+                "{}Echo: [CONTEXT SUMMARY ERROR] Failed to build provider request: {}. Keeping existing context.{}",
+                crate::agent::YELLOW,
+                e,
+                crate::agent::RESET_COLOR
+            );
+
+            return Ok(());
+        }
+    };
 
     // Call the model
-    let response = match reqwest::Client::new()
+    let client = reqwest::Client::new();
+
+    let mut request = client
         .post(&config.endpoint.url)
-        .json(&payload)
-        .send()
-        .await
-    {
+        .json(&payload);
+
+    if !config.endpoint.api_key.trim().is_empty() {
+        request = request.bearer_auth(&config.endpoint.api_key);
+    }
+
+    let response = match request.send().await {
         Ok(response) => response,
 
         Err(e) => {
@@ -197,19 +216,17 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
         }
     };
 
-    let summary_text = match response_json
-        .get("choices")
-        .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-    {
-        Some(summary) if !summary.trim().is_empty() => summary.trim().to_string(),
+    let summary_text = match providers::extract_response(
+        &config.endpoint,
+        &response_json,
+    ) {
+        Ok(summary) => summary,
 
-        _ => {
+        Err(e) => {
             eprintln!(
-                "{}Echo: [CONTEXT SUMMARY ERROR] Model returned no usable summary. Keeping existing context.{}",
+                "{}Echo: [CONTEXT SUMMARY ERROR] Failed to extract provider response: {}. Keeping existing context.{}",
                 crate::agent::YELLOW,
+                e,
                 crate::agent::RESET_COLOR
             );
 

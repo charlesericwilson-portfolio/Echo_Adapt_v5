@@ -1,6 +1,25 @@
+# Model provider protocol:
+#
+#   "local"
+#       Default. Local OpenAI-compatible endpoint.
+#       Examples: llama.cpp, vLLM, SGLang, LM Studio.
+#
+#   "openai_compatible"
+#       Remote OpenAI-compatible Chat Completions endpoint.
+#       Examples: Google Gemini, Anthropic Claude using chat/completions endpoint, DeepSeek,
+#       and other compatible services.
+#
+#   "grok"
+#       xAI Grok Responses API.
+#
+# Default: "local"
+provider = "local"
+
 [endpoint]
+provider = "local"
 url = "http://localhost:8080/v1/chat/completions"
 model = "Echo"
+api_key = ""
 temperature = 0.7
 max_tokens = 2048
 
@@ -16,7 +35,7 @@ model = "Echo"  # or a dedicated embedding model
 
 [web_search]
 url = "https://api.tavily.com/search"
-api_key = "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"
+api_key = ""
 
 [paths]
 home_dir = ""

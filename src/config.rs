@@ -41,10 +41,21 @@ impl Default for ToolTagsConfig {
     }
 }
 
+fn default_provider() -> String {
+    "local".to_string()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EndpointConfig {
+    #[serde(default = "default_provider")]
+    pub provider: String,
+
     pub url: String,
     pub model: String,
+
+    #[serde(default)]
+    pub api_key: String,
+
     pub temperature: f32,
     pub max_tokens: u32,
 }
