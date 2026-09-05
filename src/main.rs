@@ -21,6 +21,7 @@ mod memory;
 mod cleanup;
 mod hotkeys;
 mod supervisor;
+mod providers;
 
 use agent::EchoAgent;
 

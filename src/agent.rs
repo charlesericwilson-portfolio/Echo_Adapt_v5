@@ -29,6 +29,7 @@ use crate::json::extract_json_tool;
 use crate::cleanup::{extract_cleanup, handle_cleanup};
 use crate::hotkeys::{self, InputAction};
 use crate::log::{save_chat_log_entry, save_chat_log_message};
+use crate::providers;
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -58,12 +59,6 @@ impl EchoAgent {
         })?,
     };
 
-        let context_path = if config.paths.context_file.starts_with('/') {
-            PathBuf::from(&config.paths.context_file)
-        } else {
-            home_dir.join(&config.paths.context_file)
-        };
-
         let db_path = if config.paths.database.starts_with('/') {
             PathBuf::from(&config.paths.database)
         } else {
@@ -73,13 +68,34 @@ impl EchoAgent {
         let db = ToolDatabase::new(db_path)?;
 
         let mut messages = vec![];
+
         let mut context_content = String::new();
 
-        if tokio::fs::metadata(&context_path).await.is_ok() {
-            context_content = tokio::fs::read_to_string(&context_path).await.unwrap_or_default();
-            println!("✅ Loaded context file: {}", context_path.display());
-        } else {
-            println!("⚠️ Context file not found at: {}", context_path.display());
+        if !config.paths.context_file.trim().is_empty() {
+            let context_path = if config.paths.context_file.starts_with('/') {
+                PathBuf::from(&config.paths.context_file)
+            } else {
+                home_dir.join(&config.paths.context_file)
+            };
+
+            if tokio::fs::metadata(&context_path).await.is_ok() {
+                match tokio::fs::read_to_string(&context_path).await {
+                    Ok(content) => {
+                        context_content = content;
+                        println!("✅ Loaded context file: {}", context_path.display());
+                    }
+
+                    Err(e) => {
+                        println!(
+                            "⚠️ Could not read context file {}: {}",
+                            context_path.display(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                println!("⚠️ Context file not found at: {}", context_path.display());
+            }
         }
 
         let main_prompt = tokio::fs::read_to_string(&config.prompts.main_system)
@@ -193,12 +209,10 @@ let trimmed_input = user_input.trim();
                 handle_completed_session_event(self, event).await?;
             }
 
-            let payload = json!({
-                "model": self.config.endpoint.model,
-                "messages": &self.messages,
-                "temperature": self.config.endpoint.temperature,
-                "max_tokens": self.config.endpoint.max_tokens
-            });
+            let payload = providers::build_payload(
+                &self.config.endpoint,
+                &self.messages,
+            )?;
 
             if self.stop_generation.load(Ordering::SeqCst) {
                 self.stop_generation.store(false, Ordering::SeqCst);
@@ -212,29 +226,27 @@ let trimmed_input = user_input.trim();
                 return Ok("[Triggered inactivity pause]".to_string());
             }
 
-            let response = reqwest::Client::new()
+            let client = reqwest::Client::new();
+
+            let mut request = client
                 .post(&self.config.endpoint.url)
-                .json(&payload)
+                .json(&payload);
+
+            if !self.config.endpoint.api_key.trim().is_empty() {
+                request = request.bearer_auth(&self.config.endpoint.api_key);
+            }
+
+            let response = request
                 .send()
                 .await?
                 .error_for_status()?;
 
             let response_json = response.json::<Value>().await?;
 
-            let response_text = response_json
-                .get("choices")
-                .and_then(|choices| choices.get(0))
-                .and_then(|choice| choice.get("message"))
-                .and_then(|message| message.get("content"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Model endpoint returned an unexpected response format: {}",
-                        response_json
-                    )
-                })?
-                .trim()
-                .to_string();
+            let response_text = providers::extract_response(
+                &self.config.endpoint,
+                &response_json,
+            )?;
 
             save_chat_log_message(
                 &self.home_dir,

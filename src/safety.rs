@@ -76,8 +76,10 @@ mod tests {
     fn test_config() -> Config {
         Config {
             endpoint: EndpointConfig {
+                provider: "local".to_string(),
                 url: "http://localhost:8080".to_string(),
                 model: "test".to_string(),
+                api_key: String::new(),
                 temperature: 0.7,
                 max_tokens: 2048,
             },
