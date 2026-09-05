@@ -1,8 +1,8 @@
 # Echo Adapt v5
 
 ### **New features asynchronous background sessions handling**
-
-**A local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, asynchronous session supervision, structured functions, memory, and controlled access to the machine they are running on.**
+**Echo is the model**
+**Adapt is A local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, asynchronous session supervision, structured functions, memory, and controlled access to the machine they are running on.**
 
 > **Current version:** Adapt v5
 > **Primary platform:** Linux
