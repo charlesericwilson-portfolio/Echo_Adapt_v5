@@ -271,8 +271,6 @@ flowchart TD
 
     Q --> Z[Background Status Tool Message]
     Z --> B
-
-    E --> K
 ```
 
 The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
