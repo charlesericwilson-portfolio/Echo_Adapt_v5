@@ -27,7 +27,7 @@ pub fn build_payload_with_settings(
     max_tokens: u32,
 ) -> Result<Value> {
     match config.provider.to_lowercase().as_str() {
-        "local" => Ok(serde_json::json!({
+        "local" | "openai_compatible" => Ok(serde_json::json!({
             "model": &config.model,
             "messages": messages,
             "temperature": temperature,
@@ -53,7 +53,7 @@ pub fn extract_response(
     response: &Value,
 ) -> Result<String> {
     let text = match config.provider.to_lowercase().as_str() {
-        "local" => response
+        "local" | "openai_compatible" => response
             .get("choices")
             .and_then(|choices| choices.get(0))
             .and_then(|choice| choice.get("message"))
