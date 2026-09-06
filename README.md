@@ -1,6 +1,6 @@
 # If you don't care about the architecture and just want to try it go [HERE](QUICK_START.md)
 # Echo Adapt v5.1
-
+Just fixed some regressions.
 ### **Local-first agent runtime with asynchronous terminal supervision and configurable model-provider support**
 
 **Echo is the model.**
