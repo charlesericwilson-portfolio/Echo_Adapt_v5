@@ -2,7 +2,9 @@
 
 Want to try Adapt without reading the full documentation? Start here.
 
-> **Platform:** Linux or Windows 11 through WSL2. Native Windows is not supported.
+**Platform:** Linux or Windows 11 through WSL2. Native Windows is not supported.
+
+---
 
 ## 1. Clone and install
 
@@ -14,13 +16,11 @@ chmod +x *.sh
 ./install_deps.sh
 ```
 
+---
+
 ## 2. Connect a model
 
-Edit:
-
-```text
-config.toml
-```
+Edit `config.toml`.
 
 For a local OpenAI-compatible server:
 
@@ -34,26 +34,31 @@ temperature = 0.7
 max_tokens = 2048
 ```
 
-Start your model server before launching Adapt.
+You can also use a remote OpenAI-compatible provider by changing `provider`, `url`, `model`, and `api_key`.
 
-You can also use a remote OpenAI-compatible provider by changing:
+Cloud-provider support may send conversation history and local tool output off your machine. Do not use a cloud provider for data that must stay local or confidential.
 
-```text
-provider
-url
-model
-api_key
-```
+---
 
-Cloud-provider support may cause conversation history and local tool output to leave your machine. Do not use a cloud provider for workflows containing data you need to keep local or confidential.
+## 3. Start the model server
 
-## 3. Build Adapt
+Adapt does not start the model. Start your inference server **before** `./run.sh`.
+
+For local mode, that is whatever serves the URL in `config.toml` (llama.cpp, vLLM, SGLang, LM Studio, Ollama’s OpenAI-compatible endpoint, and similar).
+
+If the server is down, Adapt will fail to talk to the model. That is not an Adapt install failure.
+
+If tool-output summarization is enabled, start that endpoint too.
+
+---
+
+## 4. Build Adapt
 
 ```bash
 ./build.sh
 ```
 
-The compiled executable is created at:
+The compiled executable is:
 
 ```text
 target/release/Adapt_v5
@@ -61,136 +66,59 @@ target/release/Adapt_v5
 
 If you modify the Rust source, rebuild before testing the changes.
 
-## 4. Choose how to run Adapt
+---
 
-### Normal mode
+## 5. Run Adapt
+
+**First test:** normal mode. It is the simplest.
 
 ```bash
 ./run.sh
 ```
 
-Runs Adapt with the permissions of your currently signed-in user.
+Runs Adapt as your signed-in user. Most host access, least isolation.
 
-This provides the most direct access to the host system and the least isolation.
-
-### Restricted mode
-
-First create the dedicated model user:
+**Restricted mode** — dedicated `model-user`, Linux user/group boundary:
 
 ```bash
 sudo ./setup_restricted_model_user.sh
-```
-
-Then launch:
-
-```bash
 ./run.sh --restricted
 ```
 
-Restricted mode runs Adapt as the dedicated:
+The model user gets its own tree under `/home/model-user/` (workspace, SQLite tool database, JSONL transcript, persistent Python venv).
 
-```text
-model-user
-```
-
-instead of your signed-in account.
-
-The model user receives its own runtime environment under:
-
-```text
-/home/model-user/
-```
-
-including its workspace, SQLite tool database, JSONL transcript, and persistent Python virtual environment.
-
-### Lockdown mode
-
-Lockdown builds on restricted mode and adds Bubblewrap isolation.
-
-First configure the restricted user if you have not already:
+**Lockdown mode** — restricted user plus Bubblewrap:
 
 ```bash
 sudo ./setup_restricted_model_user.sh
-```
-
-Then configure the lockdown prerequisites:
-
-```bash
 sudo ./setup_lockdown.sh
-```
-
-Launch with:
-
-```bash
 ./run.sh --lockdown
 ```
 
-Lockdown keeps networking available so Adapt can still reach model endpoints, web tools, APIs, package repositories, and other network resources while adding a stronger filesystem/process boundary.
+Lockdown keeps networking available so Adapt can still reach model endpoints, web tools, APIs, and package repos. It adds a stronger filesystem/process boundary.
 
 ### Why lockdown may ask for your password twice
 
 This is expected.
 
-The two prompts authorize separate operations involved in launching the isolated environment:
+1. Switch from your account to `model-user`.
+2. Launch the Bubblewrap runtime.
 
-1. switching from your signed-in account to the dedicated `model-user`;
-2. launching the Bubblewrap-isolated runtime.
+Adapt does not read, store, or pass your sudo password to the model. Depending on your sudo cache, one or both prompts may not appear.
 
-Adapt does not read, store, or pass your sudo password to the model.
-
-Depending on your sudo credential cache, one or both prompts may not appear.
-
-## 5. Pick the mode you want
-
-```text
-./run.sh
-    Current-user permissions
-    Maximum host access
-
-./run.sh --restricted
-    Dedicated model-user
-    Linux user/group permission boundary
-
-./run.sh --lockdown
-    Dedicated model-user + Bubblewrap
-    Stronger filesystem/process isolation
-```
-
-For a first test, normal mode is the simplest.
-
-If you want the model separated from your signed-in account, use restricted mode.
-
-If you want the stronger optional isolation boundary, use lockdown mode.
+---
 
 ## Something broke?
 
-Please open a GitHub issue and include whatever you know about your:
+Open a GitHub issue and include whatever you know:
 
-```text
-Linux distribution / WSL2 environment
-terminal emulator
-model server or provider
-model
-launch mode
-error output
-```
+- Linux distribution / WSL2
+- terminal emulator
+- model server or provider
+- model
+- launch mode (`run.sh`, `--restricted`, or `--lockdown`)
+- error output
 
-Even a short report such as:
+Short reports help. Example: `Works on Fedora` or `Lockdown fails on Ubuntu with this error`.
 
-```text
-Works on Fedora
-```
-
-or:
-
-```text
-Lockdown fails on Ubuntu with this error
-```
-
-is useful.
-
-For configuration, architecture, security, providers, tools, memory, asynchronous sessions, and implementation details, see the main:
-
-```text
-README.md
-```
+Architecture, security, providers, tools, memory, and async sessions are in [README.md](README.md).
