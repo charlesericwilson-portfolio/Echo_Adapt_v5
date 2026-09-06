@@ -27,7 +27,10 @@ pub async fn handle_command(
 
     if let Err(e) = is_command_safe(command, &agent.config) {
         println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
-        agent.messages.push(json!({"role": "assistant", "content": format!("Safety block: {}", e)}));
+        agent.messages.push(json!({
+            "role": &agent.config.messages.tool_role_name,
+            "content": format!("Safety block: {}", e)
+        }));
         return Ok(());
     }
 

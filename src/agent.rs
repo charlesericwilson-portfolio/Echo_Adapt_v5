@@ -258,8 +258,11 @@ let trimmed_input = user_input.trim();
 
             // 1. Check for command execution
             if let Some(command) = extract_command(&response_text, &tags) {
-                let block = format!("{}{}{}", tags.command_open, command, tags.command_close);
-                let cleaned = response_text.replace(&block, "").trim().to_string();
+                let cleaned = strip_tag_flags(
+                    &response_text,
+                    &tags.command_open,
+                    &tags.command_close,
+                );
 
                 self.messages.push(json!({"role": "assistant", "content": cleaned}));
                 if !cleaned.trim().is_empty() {
@@ -271,8 +274,11 @@ let trimmed_input = user_input.trim();
             // 2. Check for tmux session command
             } else if let Some((session_name, command)) = extract_session_command(&response_text, &tags) {
                 let full_open = format!("{}{}\">", tags.session_open, session_name);
-                let block = format!("{}{}{}", full_open, command, tags.session_close);
-                let cleaned = response_text.replace(&block, "").trim().to_string();
+                let cleaned = strip_tag_flags(
+                    &response_text,
+                    &full_open,
+                    &tags.session_close,
+                );
 
                 self.messages.push(json!({"role": "assistant", "content": cleaned}));
                 if !cleaned.trim().is_empty() {
@@ -300,8 +306,11 @@ let trimmed_input = user_input.trim();
 
             // 4. Check for JSON tool call
             } else if let Some(json_content) = extract_json_tool(&response_text, &tags) {
-                let block = format!("{}{}{}", tags.json_open, json_content, tags.json_close);
-                let cleaned = response_text.replace(&block, "").trim().to_string();
+                let cleaned = strip_tag_flags(
+                    &response_text,
+                    &tags.json_open,
+                    &tags.json_close,
+                );
 
                 self.messages.push(json!({"role": "assistant", "content": cleaned}));
                 if !cleaned.trim().is_empty() {
@@ -363,4 +372,8 @@ let trimmed_input = user_input.trim();
 
         Ok(())
     }
+}
+
+fn strip_tag_flags(text: &str, open: &str, close: &str) -> String {
+    text.replace(open, "").replace(close, "").trim().to_string()
 }

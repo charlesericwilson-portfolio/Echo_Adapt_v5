@@ -463,7 +463,7 @@ pub async fn handle_session_command(
             );
 
             agent.messages.push(json!({
-                "role": "assistant",
+                "role": &agent.config.messages.tool_role_name,
                 "content": format!("Safety block: {}", e)
             }));
 
