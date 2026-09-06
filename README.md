@@ -1,7 +1,7 @@
 # If you don't care about the architecture and just want to try it go [HERE](QUICK_START.md)
 # Echo Adapt v5.1
 ### **Local-first agent runtime with asynchronous terminal supervision, configurable model-provider support, and optional Linux isolation**
-
+This repo is updated almost daily.
 Recent v5.1 work adds tested restricted-user and Bubblewrap lockdown launch modes, improves runtime file staging and permissions, preserves tool-call content correctly when executable tags are stripped from live context, and adds terminal-emulator detection for isolated launches.
 
 **Echo is the model.**
