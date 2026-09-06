@@ -1,7 +1,8 @@
 # If you don't care about the architecture and just want to try it go [HERE](QUICK_START.md)
 # Echo Adapt v5.1
-Just fixed some regressions.
-### **Local-first agent runtime with asynchronous terminal supervision and configurable model-provider support**
+### **Local-first agent runtime with asynchronous terminal supervision, configurable model-provider support, and optional Linux isolation**
+
+Recent v5.1 work adds tested restricted-user and Bubblewrap lockdown launch modes, improves runtime file staging and permissions, preserves tool-call content correctly when executable tags are stripped from live context, and adds terminal-emulator detection for isolated launches.
 
 **Echo is the model.**
 
@@ -613,8 +614,9 @@ sequenceDiagram
 
     U->>M: Complete a task
     M->>A: Assistant response + tool tag
-    A->>A: Detect and strip executable tag
-    A->>T: Execute tool
+    A->>A: Detect and parse tool request
+    A->>A: Strip executable tag before live-context reinjection
+    A->>T: Execute parsed tool
     T->>A: Tool output
     A->>M: tool message
     M->>A: Next assistant response + tool tag
@@ -847,9 +849,9 @@ resolve to the restricted user's persistent virtual environment automatically.
 
 ---
 
-# Restricted Model User
+# Execution Modes: Normal, Restricted, and Lockdown
 
-Adapt can be run in two modes.
+Adapt can now be launched in three security modes. The mode changes the operating-system authority available to the Adapt process; it does not change the tool protocol used by the model.
 
 ## Normal Mode
 
@@ -857,37 +859,141 @@ Adapt can be run in two modes.
 ./run.sh
 ```
 
-Adapt runs with the permissions of the current user.
+Adapt runs as the currently signed-in user and therefore inherits that user's normal filesystem, executable, network, and sudo access.
 
-This is the least restrictive mode and should be treated accordingly.
+This provides the least isolation and the greatest compatibility with the host environment.
 
 ## Restricted Mode
+
+First configure the dedicated model account:
+
+```bash
+sudo ./setup_restricted_model_user.sh
+```
+
+Then launch:
 
 ```bash
 ./run.sh --restricted
 ```
 
-Adapt runs as a dedicated Linux user.
+Adapt runs as a dedicated Linux user (`model-user`) rather than as the signed-in desktop user.
 
-The included setup script creates:
+The setup creates a self-contained runtime under:
 
 ```text
 /home/model-user/
+├── Adapt_v5
+├── config.toml
+├── main_system.txt
+├── summarizer.txt
+├── echo_tools.db
+├── echo_chat.jsonl
 ├── .venv/
-└── model-workspace/
+└── workspace/
 ```
 
-The parent home directory is controlled separately while explicit writable locations are provided for the model.
+Runtime files that need to remain protected, such as configuration and prompt files, can remain administrator-controlled, while the model account is given write access only where runtime behavior requires it. The SQLite database remains writable so Adapt can record tool activity, and the workspace remains writable for model-created files.
 
-The goal is to use **real Linux permissions** as part of the security model instead of pretending the agent is sandboxed because an application-level prompt says so.
+The dedicated Python virtual environment is persistent at:
 
-### Important
+```text
+/home/model-user/.venv
+```
 
-This is **not a complete filesystem sandbox**.
+Adapt-managed tmux sessions automatically expose that environment through `VIRTUAL_ENV` and `PATH`; the model does not need to manually activate it.
 
-Normal Linux writable locations such as `/tmp`, `/var/tmp`, shared mounts, or other directories allowed by host permissions may still be writable.
+Do **not** use:
 
-If you require a strict filesystem boundary, use additional operating-system isolation such as containers, namespaces, or another sandboxing layer.
+```bash
+su - model-user
+```
+
+The model user's password login is intentionally locked. `run.sh --restricted` performs the user transition for you.
+
+Restricted mode is based on ordinary Linux user/group ownership and permissions. It is a useful security boundary, but it is **not a complete filesystem sandbox**. Locations that Linux permits `model-user` to access remain accessible.
+
+## Lockdown Mode
+
+Lockdown adds a Bubblewrap sandbox around the dedicated restricted user.
+
+First configure the restricted account as above, then configure the lockdown prerequisites:
+
+```bash
+sudo ./setup_lockdown.sh
+```
+
+The lockdown setup checks the host environment, verifies Bubblewrap and the required Linux user-namespace/AppArmor behavior, and performs a Bubblewrap self-test. The setup is intended to avoid silently claiming lockdown is available when the host cannot actually create the sandbox.
+
+Launch with:
+
+```bash
+./run.sh --lockdown
+```
+
+Conceptually:
+
+```text
+signed-in user
+      ↓
+run.sh --lockdown
+      ↓
+dedicated model-user
+      ↓
+Bubblewrap namespace / filesystem boundary
+      ↓
+Adapt
+      ↓
+model tools
+```
+
+Lockdown keeps the dedicated-user boundary and adds namespace/filesystem isolation around the runtime. Required Adapt files and writable runtime locations are deliberately exposed to the sandbox rather than recreating the repository inside a complicated nested directory structure.
+
+Network access is retained because Adapt may require it for model endpoints, web tools, package access, APIs, or other configured functionality.
+
+### Why Lockdown May Ask for Your Password Twice
+
+When launching:
+
+```bash
+./run.sh --lockdown
+```
+
+you may receive two sudo authentication prompts. This is expected.
+
+The prompts authorize two separate privileged transitions involved in the lockdown launch:
+
+1. the transition from the signed-in account to the dedicated `model-user`;
+2. the launch/setup of the Bubblewrap-isolated runtime.
+
+Your sudo password is handled by `sudo` in the terminal. It is **not** passed through the model, stored in model context, or written into Adapt's tool messages.
+
+Depending on your system's sudo credential cache, one or both prompts may sometimes be satisfied by a recent authentication and therefore may not appear.
+
+### Terminal Launching
+
+Restricted and lockdown launches may need a fresh terminal so the interactive Adapt process owns the correct foreground terminal after the user/security transition.
+
+`run.sh` therefore detects supported terminal emulators rather than assuming one desktop environment. Current fallbacks include Konsole, GNOME Terminal, Kitty, Alacritty, XFCE Terminal, and xterm.
+
+### Choosing a Mode
+
+```text
+./run.sh
+    Current user permissions
+    Highest host access / least isolation
+
+./run.sh --restricted
+    Dedicated model-user
+    Linux user/group permission boundary
+
+./run.sh --lockdown
+    Dedicated model-user + Bubblewrap
+    Stronger optional filesystem/process isolation
+```
+
+No mode makes model-controlled execution risk-free. The appropriate mode depends on the tools, files, network resources, and host authority you intend to expose.
+
 
 ---
 
@@ -919,12 +1025,15 @@ flowchart TD
     B --> C[Adapt Safety Checks]
     C --> D[Command Deny List / Obfuscation Checks]
     D --> E[Linux User Permissions]
-    E --> F[sudo Allowlist if configured]
-    F --> G[Operating System]
+    E --> F{Lockdown enabled?}
+    F -->|Yes| G[Bubblewrap Isolation]
+    F -->|No| H[sudo Allowlist if configured]
+    G --> H
+    H --> I[Operating System]
 
-    G --> H[Tool Output]
-    H --> I[Optional Summarizer]
-    I --> J[Main Model]
+    I --> J[Tool Output]
+    J --> K[Optional Summarizer]
+    K --> L[Main Model]
 ```
 
 No single layer should be treated as perfect protection.
@@ -937,6 +1046,7 @@ The current layers include:
 * configurable deny rules,
 * obfuscation checks,
 * dedicated Linux user permissions,
+* optional Bubblewrap lockdown isolation,
 * optional sudo allowlisting,
 * workspace separation,
 * optional tool-output summarization.
@@ -1090,6 +1200,8 @@ assistant
 ```
 
 Raw assistant responses are persisted before executable tool tags are stripped from the **live** model context.
+
+The framework first detects and parses the model-generated tool request. Only after the request has been captured for execution are the executable opening/closing tags removed from the assistant content that is retained in live context. The tool's command or argument content is preserved; only the executable tag flags are removed.
 
 That separation is intentional.
 
@@ -1258,6 +1370,7 @@ chmod +x build.sh
 chmod +x run.sh
 chmod +x install_deps.sh
 chmod +x setup_restricted_model_user.sh
+chmod +x setup_lockdown.sh
 ```
 
 ## 3. Install Dependencies
@@ -1386,6 +1499,22 @@ Then launch:
 ./run.sh --restricted
 ```
 
+### Lockdown
+
+After configuring the restricted account, configure the Bubblewrap lockdown prerequisites:
+
+```bash
+sudo ./setup_lockdown.sh
+```
+
+Then launch:
+
+```bash
+./run.sh --lockdown
+```
+
+Lockdown may request sudo authentication twice because the user transition and isolated launch are separate privileged operations.
+
 Do **not** use:
 
 ```bash
@@ -1394,7 +1523,7 @@ su - model-user
 
 The restricted user's password login is intentionally locked by the setup script.
 
-`run.sh --restricted` performs the privilege transition correctly.
+Use `run.sh --restricted` or `run.sh --lockdown` so the launcher performs the required transition and terminal handling.
 
 ---
 
@@ -1563,6 +1692,9 @@ Adapt v5.1 currently includes:
 * configurable safety deny rules
 * obfuscation checks
 * Linux-permission-based restricted-user mode
+* optional Bubblewrap lockdown mode
+* lockdown prerequisite/self-test setup
+* terminal-emulator detection for isolated launches
 * controlled sudo configuration
 * persistent Python virtual environment for the restricted user
 * terminal hotkey support
@@ -1677,7 +1809,7 @@ The current Echo Instroder model can follow the Adapt protocol with little or no
 Adapt is **not**:
 
 * a perfect security sandbox,
-* a replacement for Linux permissions,
+* a replacement for Linux permissions or host security policy,
 * a guarantee that a model will behave correctly,
 * tied to one particular model,
 * tied to llama.cpp,
@@ -1767,15 +1899,11 @@ The current provider abstraction intentionally covers protocols rather than main
 
 Future provider code should only be added when a service genuinely requires a different request/response protocol.
 
-### Stricter restricted-user mode
+### Lockdown hardening and portability
 
-A more restrictive setup is being considered where a dedicated model user:
+Adapt now includes an optional Bubblewrap lockdown mode in addition to the dedicated restricted-user mode.
 
-* can only read approved workspace locations,
-* has a dedicated executable directory,
-* and can only execute binaries intentionally placed into that directory.
-
-This would provide a stronger optional operating-system boundary than the current restricted-user configuration.
+Near-term work can continue hardening that boundary and testing it across additional Linux distributions, AppArmor/user-namespace configurations, terminal emulators, and host environments without making lockdown mandatory for normal Adapt operation.
 
 ## Larger v6 Direction
 
