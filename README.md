@@ -1804,6 +1804,23 @@ The current Echo Instroder model can follow the Adapt protocol with little or no
 
 ---
 
+# Recent Autonomous Workflow Example
+
+The following is a recent simple research workflow.
+
+I asked Echo for the top ten dog names, intentionally did **not** provide the correct working directory, and requested the final artifact in Markdown format.
+
+The workflow demonstrates the model recovering the required workspace state and continuing through a multi-step task rather than requiring the entire execution path to be specified in advance.
+
+### Autonomous Workflow
+
+![Echo Adapt autonomous workflow](screenshots/Research-1.png)
+
+![Echo Adapt persistent terminal session](screenshots/Research-2.png)
+
+[Artifact](dog_names.md)
+
+
 # What Adapt Is Not
 
 Adapt is **not**:
@@ -2101,18 +2118,3 @@ When using a cloud model provider, also consider what local information will lea
 
 ---
 
-# Recent Autonomous Workflow Example
-
-The following is a recent simple research workflow.
-
-I asked Echo for the top ten dog names, intentionally did **not** provide the correct working directory, and requested the final artifact in Markdown format.
-
-The workflow demonstrates the model recovering the required workspace state and continuing through a multi-step task rather than requiring the entire execution path to be specified in advance.
-
-### Autonomous Workflow
-
-![Echo Adapt autonomous workflow](screenshots/Research-1.png)
-
-![Echo Adapt persistent terminal session](screenshots/Research-2.png)
-
-[Artifact](dog_names.md)
