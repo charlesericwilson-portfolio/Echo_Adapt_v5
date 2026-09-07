@@ -6,9 +6,9 @@
 
 use anyhow::Result;
 use std::fs;
-use serde_json::json;
 use crate::EchoAgent;
 use crate::log::save_chat_log_message;
+use crate::sessions::end_all_sessions;
 
 /// Check if the model response contains a `<cleanup>` or `<cleanup/>` tag.
 pub fn extract_cleanup(text: &str) -> Option<()> {
@@ -58,12 +58,20 @@ pub async fn handle_cleanup(agent: &mut EchoAgent, _user_input: &str) -> Result<
         format!("<tool_output>Directory {} does not exist or is already empty.</tool_output>", temp_dir.display())
     };
 
+    // Cleanup is the hard task boundary: discard any undelivered background
+    // observations and terminate only tmux sessions owned by this Adapt process.
+    agent.pending_background_output.clear();
+    let ended_sessions = end_all_sessions(&agent.active_sessions).await?;
+
+    let output = format!(
+        "{}\n<tool_output>Ended {} Adapt-managed session(s) and cleared pending background output.</tool_output>",
+        output,
+        ended_sessions
+    );
+
     println!("🧹 Executed Cleanup: {}", output);
 
-    agent.messages.push(json!({
-        "role": &agent.config.messages.tool_role_name,
-        "content": &output
-    }));
+    agent.push_tool_result(&output);
 
     save_chat_log_message(
         &agent.home_dir,

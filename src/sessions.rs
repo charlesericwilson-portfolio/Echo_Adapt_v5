@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
-use serde_json::json;
 
 use crate::supervisor::{SessionEvent, SessionState};
 use crate::summary::summarize_output;
@@ -150,10 +149,12 @@ pub async fn handle_completed_session_event(
         summary
     );
 
-    agent.messages.push(json!({
-        "role": &agent.config.messages.tool_role_name,
-        "content": &tool_content
-    }));
+     agent.pending_background_output.push(tool_content.clone());
+
+    if let Err(e) = agent.db.log_tool_call(&event.session_name, "[background]", &summary) {
+        println!("{}Warning: Failed to log background session to DB: {}{}",
+                 crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
+    }
 
     save_chat_log_message(
         &agent.home_dir,
@@ -396,6 +397,66 @@ pub async fn end_session(
     Ok(())
 }
 
+/// End every tmux session currently owned by this Adapt process.
+///
+/// The session map is cleared before awaiting tmux so pending SessionState
+/// events cannot leak across the task boundary. This intentionally kills
+/// only Adapt-managed sessions, never the user's entire tmux server.
+pub async fn end_all_sessions(
+    active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
+) -> Result<usize> {
+    let session_names: Vec<(String, bool)> = {
+        let mut sessions = active_sessions.lock().await;
+        let names = sessions.iter()
+            .map(|(name, state)| (name.clone(), state.is_running()))
+            .collect();
+        sessions.clear();
+        names
+    };
+
+    let mut killed = 0usize;
+
+    for (name, was_running) in session_names {
+        if was_running {
+            println!(
+                "{}Warning: cleanup ended SESSION '{}' while it still had work running{}",
+                crate::agent::YELLOW, name, crate::agent::RESET_COLOR
+            );
+        }
+
+        let tmux_name = tmux_session_name(&name);
+
+        match Command::new("tmux")
+            .args(["kill-session", "-t", &tmux_name])
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {
+                killed += 1;
+            }
+            Ok(_) => {
+                println!(
+                    "{}Warning: Failed to end Adapt session '{}'{}",
+                    crate::agent::YELLOW,
+                    name,
+                    crate::agent::RESET_COLOR
+                );
+            }
+            Err(e) => {
+                println!(
+                    "{}Warning: Failed to end Adapt session '{}': {}{}",
+                    crate::agent::YELLOW,
+                    name,
+                    e,
+                    crate::agent::RESET_COLOR
+                );
+            }
+        }
+    }
+
+    Ok(killed)
+}
+
 pub async fn start_session_cleanup_task(
     active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
 ) {
@@ -462,10 +523,15 @@ pub async fn handle_session_command(
                 crate::agent::RESET_COLOR
             );
 
-            agent.messages.push(json!({
-                "role": &agent.config.messages.tool_role_name,
-                "content": format!("Safety block: {}", e)
-            }));
+            let msg = format!("Safety block: {}", e);
+            agent.push_tool_result(&msg);
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                &msg,
+            ).await?;
+
 
             return Ok(());
         }
@@ -493,10 +559,7 @@ pub async fn handle_session_command(
                         crate::agent::RESET_COLOR
                     );
 
-                    agent.messages.push(json!({
-                        "role": &agent.config.messages.tool_role_name,
-                        "content": &tool_content
-                    }));
+                    agent.push_tool_result(&tool_content);
 
                     save_chat_log_message(
                         &agent.home_dir,
@@ -508,6 +571,14 @@ pub async fn handle_session_command(
                 }
             }
         }
+
+        println!(
+            "{}Echo: Executing in SESSION '{}' → {}{}",
+            crate::agent::YELLOW,
+            session_name,
+            cmd,
+            crate::agent::RESET_COLOR
+        );
 
         start_or_reuse_session(
             agent.home_dir.clone(),
@@ -543,15 +614,7 @@ pub async fn handle_session_command(
                     crate::agent::RESET_COLOR
                 );
 
-                agent.messages.push(json!({
-                    "role": "assistant",
-                    "content": format!("Executed command in session '{}'", session_name)
-                }));
-
-                agent.messages.push(json!({
-                    "role": &agent.config.messages.tool_role_name,
-                    "content": &tool_content
-                }));
+                agent.push_tool_result(&tool_content);
 
                 save_chat_log_message(
                     &agent.home_dir,
@@ -578,10 +641,7 @@ pub async fn handle_session_command(
                     crate::agent::RESET_COLOR
                 );
 
-                agent.messages.push(json!({
-                    "role": &agent.config.messages.tool_role_name,
-                    "content": &tool_content
-                }));
+                agent.push_tool_result(&tool_content);
 
                 save_chat_log_message(
                     &agent.home_dir,
@@ -596,10 +656,7 @@ pub async fn handle_session_command(
         let _ = end_session(agent.home_dir.clone(), &agent.active_sessions, session_name).await;
         let tool_content = format!("Session '{}' has been terminated.", session_name);
 
-        agent.messages.push(json!({
-            "role": &agent.config.messages.tool_role_name,
-            "content": &tool_content
-        }));
+        agent.push_tool_result(&tool_content);
 
         save_chat_log_message(
             &agent.home_dir,

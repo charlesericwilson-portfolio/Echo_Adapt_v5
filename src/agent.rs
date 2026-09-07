@@ -44,6 +44,7 @@ pub struct EchoAgent {
     pub max_turns_counter: u32,
     pub active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
+    pub pending_background_output: Vec<String>,
 }
 
 impl EchoAgent {
@@ -116,6 +117,7 @@ impl EchoAgent {
             max_turns_counter: initial_counter,
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pending_background_output: Vec::new(),
         };
 
         start_session_cleanup_task(active_sessions).await;
@@ -371,6 +373,23 @@ let trimmed_input = user_input.trim();
         self.max_turns_counter = 0;
 
         Ok(())
+    }
+
+    pub fn push_tool_result(&mut self, content: &str) {
+        if self.pending_background_output.is_empty() {
+            self.messages.push(json!({
+                "role": &self.config.messages.tool_role_name,
+                "content": content
+            }));
+        } else {
+            let extra = self.pending_background_output.join("\n\n---\n\n");
+            self.pending_background_output.clear();
+
+            self.messages.push(json!({
+                "role": &self.config.messages.tool_role_name,
+                "content": format!("{}\n\n---\n\n{}", content, extra)
+            }));
+        }
     }
 }
 
