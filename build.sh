@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=== Building Echo Adapt v5 ==="
-
+rm -f Cargo.lock
+cargo update
 cargo build --release --locked
 
 BINARY="$SCRIPT_DIR/target/release/Adapt_v5"

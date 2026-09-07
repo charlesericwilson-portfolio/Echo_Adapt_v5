@@ -16,7 +16,8 @@ if command -v apt-get >/dev/null 2>&1; then
         build-essential \
         pkg-config \
         python3 \
-        python3-venv
+        python3-venv \
+        cargo
 
 elif command -v dnf >/dev/null 2>&1; then
     echo "Detected dnf (Fedora/RHEL family)"
