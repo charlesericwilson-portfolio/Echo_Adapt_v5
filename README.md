@@ -851,6 +851,8 @@ resolve to the restricted user's persistent virtual environment automatically.
 
 # Execution Modes: Normal, Restricted, and Lockdown
 
+Have tested the installers with Ubuntu, Kubuntu, Kali and tested the installers and launch scripts with xfce, kde, and gnome terminals.
+
 Adapt can now be launched in three security modes. The mode changes the operating-system authority available to the Adapt process; it does not change the tool protocol used by the model.
 
 ## Normal Mode
