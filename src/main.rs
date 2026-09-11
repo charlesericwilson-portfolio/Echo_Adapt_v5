@@ -22,6 +22,7 @@ mod cleanup;
 mod hotkeys;
 mod supervisor;
 mod providers;
+mod parser;
 
 use agent::EchoAgent;
 

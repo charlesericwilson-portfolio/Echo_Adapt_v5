@@ -8,7 +8,6 @@ use anyhow::Result;
 use crate::supervisor::{SessionEvent, SessionState};
 use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
-use crate::config::ToolTagsConfig;
 use crate::log::save_chat_log_message;
 
 const SESSION_FOREGROUND_WAIT_MS: u64 = 2_000;
@@ -89,43 +88,6 @@ pub async fn start_or_reuse_session(
     }
 
     Ok(())
-}
-
-/// Dynamically extracts session command based on configured tags
-pub fn extract_session_command(response_text: &str, tags: &ToolTagsConfig) -> Option<(String, String)> {
-    if let Some(start) = response_text.find(&tags.session_open) {
-        let after = &response_text[start + tags.session_open.len()..];
-
-        if let Some(name_end) = after.find('"') {
-            let session_name = after[..name_end].to_string();
-
-            if let Some(tag_close) = response_text[start..].find('>') {
-                let content_start = start + tag_close + 1;
-
-                if let Some(end) = response_text[content_start..].find(&tags.session_close) {
-                    let command = response_text[content_start..content_start + end]
-                        .trim()
-                        .to_string();
-
-                    return Some((session_name, command));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Dynamically extracts end session command based on configured tags
-pub fn extract_end_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
-    if let Some(start) = response_text.find(&tags.end_session_open) {
-        let after = &response_text[start + tags.end_session_open.len()..];
-
-        if let Some(name_end) = after.find('"') {
-            let session_name = after[..name_end].to_string();
-            return Some(session_name);
-        }
-    }
-    None
 }
 
 pub enum SessionExecution {

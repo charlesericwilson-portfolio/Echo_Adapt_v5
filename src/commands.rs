@@ -1,21 +1,9 @@
 use anyhow::Result;
 use serde_json::json;
 use crate::safety::is_command_safe;
-use crate::config::ToolTagsConfig;
 use crate::log::save_chat_log_message;
 use crate::summary::summarize_output;
 
-/// Extracts a command dynamically based on configured tags
-pub fn extract_command(response_text: &str, tags: &ToolTagsConfig) -> Option<String> {
-    if let Some(start) = response_text.find(&tags.command_open) {
-        let content_start = start + tags.command_open.len();
-        if let Some(end) = response_text[content_start..].find(&tags.command_close) {
-            let inner = &response_text[content_start..content_start + end];
-            return Some(inner.trim().to_string());
-        }
-    }
-    None
-}
 
 pub async fn handle_command(
     agent: &mut crate::agent::EchoAgent,

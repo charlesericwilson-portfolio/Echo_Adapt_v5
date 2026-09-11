@@ -5,7 +5,7 @@ use crate::log::save_chat_log_message;
 use std::time::Duration;
 use crate::memory::Memory;
 use std::path::PathBuf;
-use crate::config::{WebSearchConfig, ToolTagsConfig};
+use crate::config::WebSearchConfig;
 use scraper::Html;
 use scraper::Selector;
 
@@ -355,16 +355,4 @@ fn parse_arguments(json_str: &str) -> Value {
     }
 
     Value::Object(serde_json::Map::new())
-}
-
-/// Dynamically extracts JSON content based on configured tags
-pub fn extract_json_tool(response: &str, tags: &ToolTagsConfig) -> Option<String> {
-    if let Some(start) = response.find(&tags.json_open) {
-        let content_start = start + tags.json_open.len();
-        if let Some(end) = response[content_start..].find(&tags.json_close) {
-            let inner = &response[content_start..content_start + end];
-            return Some(inner.trim().to_string());
-        }
-    }
-    None
 }

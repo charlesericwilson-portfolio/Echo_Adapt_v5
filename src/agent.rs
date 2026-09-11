@@ -23,10 +23,9 @@ use crate::sessions::start_session_cleanup_task;
 use crate::config::Config;
 use crate::db::ToolDatabase;
 use crate::summary::summarize_context;
-use crate::sessions::{extract_session_command, extract_end_command, clean_up_sessions, handle_completed_session_event};
-use crate::commands::extract_command;
-use crate::json::extract_json_tool;
-use crate::cleanup::{extract_cleanup, handle_cleanup};
+use crate::sessions::{clean_up_sessions, handle_completed_session_event};
+use crate::cleanup::handle_cleanup;
+use crate::parser::{extract_last_tool_call, remove_tool_call_for_display, ParsedToolCallKind};
 use crate::hotkeys::{self, InputAction};
 use crate::log::{save_chat_log_entry, save_chat_log_message};
 use crate::providers;
@@ -45,6 +44,10 @@ pub struct EchoAgent {
     pub active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
     pub pending_background_output: Vec<String>,
+
+    // Soft duplicate-tool detection. This never blocks execution.
+    pub last_tool_signature: Option<String>,
+    pub repeated_tool_call_count: u32,
 }
 
 impl EchoAgent {
@@ -118,6 +121,8 @@ impl EchoAgent {
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_background_output: Vec::new(),
+            last_tool_signature: None,
+            repeated_tool_call_count: 0,
         };
 
         start_session_cleanup_task(active_sessions).await;
@@ -171,6 +176,9 @@ let trimmed_input = user_input.trim();
             }
 
             self.max_turns_counter = 0;
+
+            // New human input is a fresh recovery boundary.
+            self.reset_tool_repeat_tracker();
 
             self.messages.push(json!({
                 "role": "user",
@@ -258,99 +266,97 @@ let trimmed_input = user_input.trim();
 
             let tags = self.config.tool_tags.clone();
 
-            // 1. Check for command execution
-            if let Some(command) = extract_command(&response_text, &tags) {
-                let cleaned = strip_tag_flags(
-                    &response_text,
-                    &tags.command_open,
-                    &tags.command_close,
-                );
+            // Preserve the EXACT assistant turn in live model history.
+            // Tool tags are intentionally kept here so inference context matches
+            // the format used during training.
+            self.messages.push(json!({
+                "role": "assistant",
+                "content": &response_text
+            }));
 
-                self.messages.push(json!({"role": "assistant", "content": cleaned}));
-                if !cleaned.trim().is_empty() {
-                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
+            // Parse ONLY this newly generated assistant turn. The parser returns
+            // the last complete valid tool call in the turn, regardless of type.
+            if let Some(tool_call) = extract_last_tool_call(&response_text, &tags) {
+                // Hide only the actionable tool call from terminal display.
+                // The raw tagged turn remains untouched in self.messages above.
+                let visible = remove_tool_call_for_display(&response_text, &tool_call);
+
+                if !visible.trim().is_empty() {
+                    println!(
+                        "{}Echo:\n{}\n{}",
+                        LIGHT_BLUE,
+                        visible.trim(),
+                        RESET_COLOR
+                    );
                 }
-                crate::commands::handle_command(self, user_input, &command).await?;
+
+                // Soft loop detection: repeated identical calls are still allowed,
+                // but Echo receives a hint to reassess instead of blindly retrying.
+                let tool_signature = tool_call_signature(&tool_call.kind);
+                if let Some(recovery_hint) = self.note_tool_call(&tool_signature) {
+                    self.push_tool_result(&recovery_hint);
+                    save_chat_log_message(
+                        &self.home_dir,
+                        &self.config.messages.tool_role_name,
+                        &recovery_hint,
+                    ).await?;
+                }
+
+                match tool_call.kind {
+                    ParsedToolCallKind::Command(command) => {
+                        crate::commands::handle_command(
+                            self,
+                            user_input,
+                            &command,
+                        ).await?;
+                    }
+
+                    ParsedToolCallKind::Session { name, command } => {
+                        crate::sessions::handle_session_command(
+                            self,
+                            user_input,
+                            &name,
+                            Some(&command),
+                        ).await?;
+                    }
+
+                    ParsedToolCallKind::EndSession(name) => {
+                        crate::sessions::handle_session_command(
+                            self,
+                            user_input,
+                            &name,
+                            None,
+                        ).await?;
+                    }
+
+                    ParsedToolCallKind::Json(json_content) => {
+                        crate::json::handle_json_tool(
+                            self,
+                            user_input,
+                            &response_text,
+                            &json_content,
+                        ).await?;
+                    }
+
+                    ParsedToolCallKind::Cleanup => {
+                        handle_cleanup(self, user_input).await?;
+                    }
+                }
+
                 continue;
-
-            // 2. Check for tmux session command
-            } else if let Some((session_name, command)) = extract_session_command(&response_text, &tags) {
-                let full_open = format!("{}{}\">", tags.session_open, session_name);
-                let cleaned = strip_tag_flags(
-                    &response_text,
-                    &full_open,
-                    &tags.session_close,
-                );
-
-                self.messages.push(json!({"role": "assistant", "content": cleaned}));
-                if !cleaned.trim().is_empty() {
-                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
-                }
-                crate::sessions::handle_session_command(self, user_input, &session_name, Some(&command)).await?;
-                continue;
-
-            // 3. Check for end session command
-            } else if let Some(session_name) = extract_end_command(&response_text, &tags) {
-                let full_tag = format!("{}{}\"/>", tags.end_session_open, session_name);
-                let fallback_tag = format!("{}{}\">", tags.end_session_open, session_name);
-                let cleaned = response_text
-                    .replace(&full_tag, "")
-                    .replace(&fallback_tag, "")
-                    .trim()
-                    .to_string();
-
-                self.messages.push(json!({"role": "assistant", "content": cleaned}));
-                if !cleaned.trim().is_empty() {
-                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
-                }
-                crate::sessions::handle_session_command(self, user_input, &session_name, None).await?;
-                continue;
-
-            // 4. Check for JSON tool call
-            } else if let Some(json_content) = extract_json_tool(&response_text, &tags) {
-                let cleaned = strip_tag_flags(
-                    &response_text,
-                    &tags.json_open,
-                    &tags.json_close,
-                );
-
-                self.messages.push(json!({"role": "assistant", "content": cleaned}));
-                if !cleaned.trim().is_empty() {
-                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
-                }
-                crate::json::handle_json_tool(self, user_input, &response_text, &json_content).await?;
-                continue;
-
-            // 5. Cleanup tool check
-            } else if extract_cleanup(&response_text).is_some() {
-                let cleaned = response_text
-                    .replace("<cleanup/>", "")
-                    .replace("<cleanup>", "")
-                    .trim()
-                    .to_string();
-
-                self.messages.push(json!({"role": "assistant", "content": cleaned}));
-                if !cleaned.trim().is_empty() {
-                    println!("{}Echo:\n{}\n{}", LIGHT_BLUE, cleaned.trim(), RESET_COLOR);
-                }
-                handle_cleanup(self, user_input).await?;
-                continue;
-
-            // 6. Final Assistant Response
-            } else {
-                self.messages.push(json!({"role": "assistant", "content": &response_text}));
-
-                let total_chars: usize = self.messages.iter()
-                    .map(|m| m["content"].as_str().unwrap_or("").len())
-                    .sum();
-
-                if total_chars > self.config.context.summarize_threshold {
-                    summarize_context(&mut self.messages, &self.config).await?;
-                }
-
-                self.max_turns_counter = 0;
-                return Ok(response_text);
             }
+
+            // No tool call in this turn: this is the final assistant response.
+            let total_chars: usize = self.messages.iter()
+                .map(|m| m["content"].as_str().unwrap_or("").len())
+                .sum();
+
+            if total_chars > self.config.context.summarize_threshold {
+                summarize_context(&mut self.messages, &self.config).await?;
+            }
+
+            self.max_turns_counter = 0;
+            return Ok(response_text);
         }
     }
 
@@ -375,6 +381,39 @@ let trimmed_input = user_input.trim();
         Ok(())
     }
 
+    /// Record a tool call signature and return a soft recovery hint when
+    /// the same exact tool call is repeated consecutively. Nothing is blocked.
+    pub fn note_tool_call(&mut self, signature: &str) -> Option<String> {
+        match &self.last_tool_signature {
+            Some(previous) if previous == signature => {
+                self.repeated_tool_call_count =
+                    self.repeated_tool_call_count.saturating_add(1);
+            }
+            _ => {
+                self.last_tool_signature = Some(signature.to_string());
+                self.repeated_tool_call_count = 1;
+            }
+        }
+
+        if self.repeated_tool_call_count == 2 {
+            Some(
+                "Recovery guidance: You have issued the exact same tool call twice in a row. \
+If the previous result showed an error, no useful progress, or the same failed outcome, stop and reason about the result before repeating it again. \
+Try a different command, tool, parameter, or approach when appropriate. \
+If repetition is intentional (for example, polling or verifying a changed state), you may continue."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+
+    /// Clear duplicate-tool state at a human/task boundary.
+    pub fn reset_tool_repeat_tracker(&mut self) {
+        self.last_tool_signature = None;
+        self.repeated_tool_call_count = 0;
+    }
+
     pub fn push_tool_result(&mut self, content: &str) {
         if self.pending_background_output.is_empty() {
             self.messages.push(json!({
@@ -393,6 +432,20 @@ let trimmed_input = user_input.trim();
     }
 }
 
-fn strip_tag_flags(text: &str, open: &str, close: &str) -> String {
-    text.replace(open, "").replace(close, "").trim().to_string()
+fn tool_call_signature(call: &ParsedToolCallKind) -> String {
+    match call {
+        ParsedToolCallKind::Command(command) => {
+            format!("command:{}", command.trim())
+        }
+        ParsedToolCallKind::Session { name, command } => {
+            format!("session:{}:{}", name.trim(), command.trim())
+        }
+        ParsedToolCallKind::EndSession(name) => {
+            format!("end_session:{}", name.trim())
+        }
+        ParsedToolCallKind::Json(json_content) => {
+            format!("json:{}", json_content.trim())
+        }
+        ParsedToolCallKind::Cleanup => "cleanup".to_string(),
+    }
 }

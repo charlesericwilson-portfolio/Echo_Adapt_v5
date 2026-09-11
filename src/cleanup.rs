@@ -10,15 +10,6 @@ use crate::EchoAgent;
 use crate::log::save_chat_log_message;
 use crate::sessions::end_all_sessions;
 
-/// Check if the model response contains a `<cleanup>` or `<cleanup/>` tag.
-pub fn extract_cleanup(text: &str) -> Option<()> {
-    if text.contains("<cleanup>") || text.contains("<cleanup/>") {
-        Some(())
-    } else {
-        None
-    }
-}
-
 /// Execute the relative workspace cleanup and append the result to `agent.messages`.
 pub async fn handle_cleanup(agent: &mut EchoAgent, _user_input: &str) -> Result<()> {
     // Dynamically get the current working directory where the process was executed
