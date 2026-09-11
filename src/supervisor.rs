@@ -6,6 +6,7 @@ use std::time::Instant;
 pub struct SessionEvent {
     pub session_name: String,
     pub marker_id: i64,
+    pub command: String,
     pub output: String,
 }
 
@@ -48,11 +49,13 @@ impl SessionState {
         &mut self,
         session_name: &str,
         marker_id: i64,
+        command: String,
         output: String,
     ) {
         self.pending.push_back(SessionEvent {
             session_name: session_name.to_string(),
             marker_id,
+            command,
             output,
         });
 

@@ -137,6 +137,14 @@ pub async fn handle_completed_session_event(
     agent: &mut crate::agent::EchoAgent,
     event: SessionEvent,
 ) -> Result<()> {
+    println!(
+        "{}Echo: [Session '{}'] background command finished → {}{}",
+        crate::agent::YELLOW,
+        event.session_name,
+        event.command,
+        crate::agent::RESET_COLOR
+    );
+
     let summary = match summarize_output(&event.output, &agent.config).await {
         Ok(s) => s,
         Err(e) => format!("(Summarizer failed: {})", e),
@@ -301,6 +309,7 @@ pub async fn execute_in_session(
         let background_tmux_name = tmux_name.clone();
         let background_marker_start = marker_start.clone();
         let background_marker_end = marker_end.clone();
+        let background_command = command.clone();
 
         tokio::spawn(async move {
             loop {
@@ -346,6 +355,7 @@ pub async fn execute_in_session(
                                     state.push_completed(
                                         &background_name,
                                         marker_id,
+                                        background_command.clone(),
                                         captured,
                                     );
                                 }
