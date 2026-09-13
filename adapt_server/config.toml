@@ -1,0 +1,26 @@
+# ADAPT GGUF server configuration
+#
+# Normal startup:
+#   ./target/debug/rust_server
+#
+# Optional alternate config:
+#   ./target/debug/rust_server --config other-config.toml
+
+[server]
+bind = "127.0.0.1:8080"
+debug_requests = false
+
+[model]
+path = "/path/to/gguf"
+context_size = 32768
+batch_size = 2048
+gpu_layers = 999
+
+[generation]
+max_tokens = 2048
+temperature = 0.7
+top_p = 0.95
+top_k = 40
+
+[output]
+strip_reasoning = true
