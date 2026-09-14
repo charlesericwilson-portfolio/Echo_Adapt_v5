@@ -33,10 +33,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-
-// ============================================================
 // Configuration
-// ============================================================
+
+#[cfg(all(feature = "rocm", feature = "cuda"))]
+compile_error!("Enable only one GPU backend: `rocm` or `cuda`.");
 
 #[derive(Parser, Debug)]
 #[command(name = "adapt_server")]
@@ -46,7 +46,6 @@ struct Args {
     #[arg(long, default_value = "config.toml")]
     config: String,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 struct Config {
@@ -58,7 +57,6 @@ struct Config {
     output: OutputConfig,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 struct ServerConfig {
     bind: SocketAddr,
@@ -66,7 +64,6 @@ struct ServerConfig {
     #[serde(default)]
     debug_requests: bool,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 struct ModelConfig {
@@ -76,7 +73,6 @@ struct ModelConfig {
     gpu_layers: u32,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 struct GenerationConfig {
     max_tokens: usize,
@@ -85,13 +81,11 @@ struct GenerationConfig {
     top_k: i32,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 struct OutputConfig {
     #[serde(default = "default_true")]
     strip_reasoning: bool,
 }
-
 
 impl Default for OutputConfig {
     fn default() -> Self {
@@ -101,11 +95,9 @@ impl Default for OutputConfig {
     }
 }
 
-
 fn default_true() -> bool {
     true
 }
-
 
 fn load_config(path: &str) -> Result<Config> {
     let text = std::fs::read_to_string(path)
@@ -129,10 +121,7 @@ fn load_config(path: &str) -> Result<Config> {
     Ok(config)
 }
 
-
-// ============================================================
 // OpenAI-compatible request / response
-// ============================================================
 
 #[derive(Debug, Clone, Deserialize)]
 struct ChatRequest {
@@ -157,13 +146,11 @@ struct ChatRequest {
     stream: Option<bool>,
 }
 
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Message {
     role: String,
     content: String,
 }
-
 
 #[derive(Debug, Serialize)]
 struct ChatResponse {
@@ -175,7 +162,6 @@ struct ChatResponse {
     usage: Usage,
 }
 
-
 #[derive(Debug, Serialize)]
 struct Choice {
     index: usize,
@@ -183,13 +169,11 @@ struct Choice {
     finish_reason: String,
 }
 
-
 #[derive(Debug, Serialize)]
 struct AssistantMessage {
     role: String,
     content: String,
 }
-
 
 #[derive(Debug, Serialize)]
 struct Usage {
@@ -198,10 +182,7 @@ struct Usage {
     total_tokens: usize,
 }
 
-
-// ============================================================
 // Runtime
-// ============================================================
 
 struct Runtime {
     // backend MUST outlive model/context
@@ -220,14 +201,12 @@ struct Runtime {
     default_top_k: i32,
 }
 
-
 struct GenerationResult {
     raw: String,
     clean: String,
     prompt_tokens: usize,
     completion_tokens: usize,
 }
-
 
 impl Runtime {
     fn load(config: &Config) -> Result<Self> {
@@ -248,16 +227,8 @@ impl Runtime {
         )
         .context("failed to load GGUF model")?;
 
-        /*
-         * IMPORTANT:
-         *
-         * Use the chat template stored INSIDE the GGUF.
-         *
-         * We are NOT trying to reinterpret Harmony, ChatML,
-         * native tool calls, or anything else here.
-         *
-         * The model gets the format it was trained to expect.
-         */
+        // Use the GGUF's native chat template. The server does not reinterpret
+        // Harmony, ChatML, native tool calls, or other model-specific formats.
         let template = model
             .chat_template(None)
             .context("GGUF has no usable native chat template")?;
@@ -290,15 +261,12 @@ impl Runtime {
         })
     }
 
-
     fn generate(&mut self, request: &ChatRequest) -> Result<GenerationResult> {
         if request.stream.unwrap_or(false) {
             bail!("stream=true is not implemented yet");
         }
 
-        // ----------------------------------------------------
-        // Build chat using model's own template
-        // ----------------------------------------------------
+        // Build chat using the model's native template.
 
         let mut chat = Vec::with_capacity(request.messages.len());
 
@@ -326,13 +294,8 @@ impl Runtime {
             )
             .context("failed to apply model chat template")?;
 
-
-        // ----------------------------------------------------
-        // Tokenize
-        //
-        // Chat template already contains its own control
-        // tokens/BOS structure, so don't inject another BOS.
-        // ----------------------------------------------------
+        // The chat template already contains its control/BOS structure,
+        // so do not inject another BOS token.
 
         let prompt_tokens = self
             .model
@@ -357,13 +320,7 @@ impl Runtime {
             );
         }
 
-
-        // ----------------------------------------------------
-        // Fresh context per request
-        //
-        // Intentionally boring.
-        // ADAPT owns conversation history.
-        // ----------------------------------------------------
+        // Fresh context per request; ADAPT owns conversation history.
 
         let ctx_size = NonZeroU32::new(self.ctx_size)
             .ok_or_else(|| anyhow!("ctx_size cannot be zero"))?;
@@ -380,10 +337,7 @@ impl Runtime {
             )
             .context("failed to create inference context")?;
 
-
-        // ----------------------------------------------------
-        // Decode prompt
-        // ----------------------------------------------------
+        // Decode the prompt in chunks no larger than the configured batch size.
 
        let last =
             prompt_tokens
@@ -418,9 +372,7 @@ impl Runtime {
                 .context("failed to decode prompt chunk")?;
         }
 
-        // ----------------------------------------------------
         // Sampling
-        // ----------------------------------------------------
 
         let temperature = request
             .temperature
@@ -442,20 +394,8 @@ impl Runtime {
                 LlamaSampler::dist(0xC0FFEE),
             ]);
 
-
-        // ----------------------------------------------------
-        // Generate RAW tokens
-        //
-        // There is intentionally NO:
-        //
-        // - tool-call parser
-        // - reasoning parser
-        // - Harmony parser
-        // - JSON tool conversion
-        // - automatic function calling
-        //
-        // We just decode the model.
-        // ----------------------------------------------------
+        // Generate raw model output only. Tool parsing, Harmony handling,
+        // JSON conversion, and function execution stay outside inference.
 
         let mut decoder = UTF_8.new_decoder();
 
@@ -473,28 +413,13 @@ impl Runtime {
 
             sampler.accept(token);
 
-            /*
-             * Keep the normal model EOG behavior.
-             *
-             * GPT-OSS may have several EOG token types.
-             * We don't convert any of them into tool calls.
-             */
+            // Honor normal EOG behavior; never reinterpret EOG as a tool call.
             if self.model.is_eog_token(token) {
                 break;
             }
 
-            /*
-             * decode_special=true is deliberate.
-             *
-             * We WANT to see:
-             *
-             *   <|channel|>
-             *   <|message|>
-             *   <think>
-             *
-             * internally, because our sanitizer below
-             * decides what leaves the server.
-             */
+            // Keep special tokens visible internally so the sanitizer decides
+            // what leaves the server.
             let piece = self
                 .model
                 .token_to_piece(
@@ -523,10 +448,7 @@ impl Runtime {
             generated += 1;
         }
 
-
-        // ----------------------------------------------------
-        // THIS IS THE ENTIRE POINT OF THIS SERVER
-        // ----------------------------------------------------
+        // Normalize model output before returning it to ADAPT.
 
         let clean = if self.strip_reasoning_output {
             strip_reasoning(&raw)
@@ -543,24 +465,10 @@ impl Runtime {
     }
 }
 
-
-// ============================================================
 // Reasoning stripper
-// ============================================================
 
 fn strip_reasoning(raw: &str) -> String {
-    /*
-     * GPT-OSS / Harmony
-     *
-     * Prefer an explicitly marked FINAL channel.
-     *
-     * Example:
-     *
-     * <|channel|>analysis<|message|>thinking...
-     * <|end|>
-     * <|start|>assistant<|channel|>final<|message|>
-     * HELLO
-     */
+    // For GPT-OSS/Harmony, prefer the explicitly marked final channel.
 
     const FINAL_MARKER: &str =
         "<|channel|>final<|message|>";
@@ -572,10 +480,7 @@ fn strip_reasoning(raw: &str) -> String {
         return clean_control_tokens(final_text);
     }
 
-
-    /*
-     * Standard think/reasoning blocks.
-     */
+    // Remove complete standard reasoning blocks.
 
     let mut text = raw.to_string();
 
@@ -584,12 +489,8 @@ fn strip_reasoning(raw: &str) -> String {
         r"(?s)<reasoning>.*?</reasoning>",
         r"(?s)<analysis>.*?</analysis>",
 
-        /*
-         * Harmony analysis channel.
-         *
-         * ONLY remove complete analysis channels.
-         * Never extract ADAPT commands from reasoning.
-         */
+        // Remove only complete Harmony analysis channels. Never extract
+        // ADAPT commands from reasoning.
         r"(?s)<\|channel\|>analysis<\|message\|>.*?<\|end\|>",
     ];
 
@@ -602,22 +503,10 @@ fn strip_reasoning(raw: &str) -> String {
     clean_control_tokens(&text)
 }
 
-
 fn clean_control_tokens(text: &str) -> String {
     let mut out = text.to_string();
 
-    /*
-     * Remove ONLY model-envelope/control markers.
-     *
-     * DO NOT remove:
-     *
-     * <command>
-     * <session>
-     * <json>
-     * <cleanup/>
-     *
-     * Those belong to ADAPT.
-     */
+    // Remove only model-envelope markers; preserve ADAPT tool tags.
 
     let markers = [
         "<|start|>assistant",
@@ -633,10 +522,7 @@ fn clean_control_tokens(text: &str) -> String {
         out = out.replace(marker, "");
     }
 
-    /*
-     * Safety net for any remaining complete think blocks
-     * after control-token cleanup.
-     */
+    // Safety net for complete think blocks left after control-token cleanup.
 
     let think_re =
         Regex::new(r"(?s)<think>.*?</think>")
@@ -649,10 +535,7 @@ fn clean_control_tokens(text: &str) -> String {
     out.trim().to_string()
 }
 
-
-// ============================================================
 // HTTP state
-// ============================================================
 
 #[derive(Clone)]
 struct AppState {
@@ -660,10 +543,7 @@ struct AppState {
     debug_requests: bool,
 }
 
-
-// ============================================================
 // Endpoints
-// ============================================================
 
 async fn health() -> impl IntoResponse {
     Json(json!({
@@ -671,7 +551,6 @@ async fn health() -> impl IntoResponse {
         "server": "adapt-gguf-server"
     }))
 }
-
 
 async fn models(
     State(state): State<AppState>,
@@ -689,7 +568,6 @@ async fn models(
         ]
     }))
 }
-
 
 async fn chat_completions(
     State(state): State<AppState>,
@@ -730,17 +608,8 @@ async fn chat_completions(
     })
     .await;
 
-    // everything else stays exactly the same
-
-    /*
-     * llama inference is blocking.
-     *
-     * Don't block Tokio's async executor.
-     *
-     * Mutex intentionally serializes generation for v0.1.
-     * We can add slots/workers later.
-     */
-
+    // llama.cpp inference is blocking, so keep it off Tokio's async executor.
+    // The mutex intentionally serializes generation for now.
 
     let generation = match result {
         Ok(Ok(value)) => value,
@@ -776,25 +645,17 @@ async fn chat_completions(
         }
     };
 
-
-    /*
-     * Debugging gold:
-     *
-     * raw stays server-side.
-     * ADAPT never receives it.
-     */
+    // Raw model output stays server-side; ADAPT receives only cleaned output.
     tracing::debug!(
         raw_model_output = %generation.raw,
         clean_model_output = %generation.clean,
         "generation complete"
     );
 
-
     let created = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-
 
     let runtime = state.runtime.lock().unwrap();
 
@@ -817,9 +678,7 @@ async fn chat_completions(
                 message: AssistantMessage {
                     role: "assistant".to_string(),
 
-                    /*
-                     * THIS is all ADAPT receives.
-                     */
+                    // ADAPT receives only cleaned assistant content.
                     content: generation.clean,
                 },
 
@@ -840,14 +699,10 @@ async fn chat_completions(
         },
     };
 
-
     Json(response).into_response()
 }
 
-
-// ============================================================
 // Main
-// ============================================================
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -870,7 +725,6 @@ async fn main() -> Result<()> {
         debug_requests: config.server.debug_requests,
     };
 
-
     let app = Router::new()
         .route(
             "/health",
@@ -886,7 +740,6 @@ async fn main() -> Result<()> {
         )
         .with_state(state);
 
-
     let listener =
         tokio::net::TcpListener::bind(bind)
             .await
@@ -894,13 +747,11 @@ async fn main() -> Result<()> {
                 format!("failed to bind {bind}")
             })?;
 
-
     println!();
     println!("ADAPT GGUF server ready");
     println!("Listening: http://{bind}");
     println!("POST /v1/chat/completions");
     println!();
-
 
     axum::serve(listener, app)
         .await
@@ -909,15 +760,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-
-// ============================================================
 // Tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn strips_think_tags() {
@@ -930,7 +777,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn strips_reasoning_tags() {
         let raw =
@@ -941,7 +787,6 @@ mod tests {
             "Hello"
         );
     }
-
 
     #[test]
     fn strips_gpt_oss_analysis_channel() {
@@ -958,7 +803,6 @@ Hello Charles!";
         );
     }
 
-
     #[test]
     fn preserves_adapt_command() {
         let raw =
@@ -973,7 +817,6 @@ Need to execute whoami.\
             "<command>whoami</command>"
         );
     }
-
 
     #[test]
     fn never_executes_command_mentioned_in_reasoning() {
