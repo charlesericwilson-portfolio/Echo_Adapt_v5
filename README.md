@@ -23,7 +23,7 @@ The basic idea is intentionally simple:
 
 Adapt does not require the model to be tied to a large agent framework, provider-specific tool API, or a hardcoded Jinja chat template.
 
-I use Adapt primarily with my own fine-tuned model, **Echo Instroder 14B**, but fine-tuning is not required. A sufficiently capable instruct or coding model can learn the included protocol from the example system prompt.
+I use Adapt primarily with my own fine-tuned model, **Echo Instroder 14B**, but fine-tuning is not required. A sufficiently capable instruct or coding model can learn the included protocol from the example system prompt. However GPT-OSS is very hard to get it to cooperate and you have to use the bundled server for it to work properly.
 
 * [Echo Instroder 14B](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
 * [Echo Training Project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
@@ -1704,6 +1704,7 @@ Adapt v5.1 currently includes:
 * multiple concurrent Adapt processes
 * Linux support
 * Windows 11 operation through WSL2
+* Built in rust server as well as a simple chat interface at http://127.0.0.1:8080/
 
 ---
 
