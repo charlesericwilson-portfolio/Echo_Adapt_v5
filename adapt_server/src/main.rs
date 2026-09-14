@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use axum::{
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
 };
@@ -543,6 +543,181 @@ struct AppState {
     debug_requests: bool,
 }
 
+async fn index() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADAPT GGUF Chat</title>
+<style>
+body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: #111;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #333;
+    font-weight: 600;
+}
+#chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+.msg {
+    max-width: 900px;
+    margin: 0 auto 12px;
+    white-space: pre-wrap;
+    line-height: 1.45;
+}
+.user { color: #9ecbff; }
+.assistant { color: #eee; }
+#composer {
+    border-top: 1px solid #333;
+    padding: 12px;
+}
+#row {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    gap: 8px;
+}
+textarea {
+    flex: 1;
+    min-height: 72px;
+    resize: vertical;
+    background: #1b1b1b;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 10px;
+}
+button {
+    background: #2b6cb0;
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    padding: 0 16px;
+    cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+#controls {
+    max-width: 900px;
+    margin: 8px auto 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 13px;
+    color: #aaa;
+}
+input {
+    width: 90px;
+    background: #1b1b1b;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+</style>
+</head>
+<body>
+<header>ADAPT GGUF Chat</header>
+
+<div id="chat"></div>
+
+<div id="composer">
+    <div id="row">
+        <textarea id="input" placeholder="Message the model..."></textarea>
+        <button id="send">Send</button>
+    </div>
+    <div id="controls">
+        <label>Temperature <input id="temperature" type="number" min="0" max="2" step="0.05" value="0.7"></label>
+        <label>Max tokens <input id="max_tokens" type="number" min="1" step="1" value="2048"></label>
+        <button id="clear" type="button">Clear chat</button>
+    </div>
+</div>
+
+<script>
+const chat = document.getElementById("chat");
+const input = document.getElementById("input");
+const send = document.getElementById("send");
+const clear = document.getElementById("clear");
+const temperature = document.getElementById("temperature");
+const maxTokens = document.getElementById("max_tokens");
+
+let messages = [];
+
+function addMessage(role, content) {
+    const div = document.createElement("div");
+    div.className = `msg ${role}`;
+    div.textContent = `${role === "user" ? "You" : "Assistant"}:\n${content}`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+async function submit() {
+    const content = input.value.trim();
+    if (!content || send.disabled) return;
+
+    messages.push({ role: "user", content });
+    addMessage("user", content);
+    input.value = "";
+    send.disabled = true;
+
+    try {
+        const response = await fetch("/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: "local",
+                messages,
+                temperature: Number(temperature.value),
+                max_tokens: Number(maxTokens.value)
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.error?.message || `HTTP ${response.status}`);
+        }
+
+        const content = data?.choices?.[0]?.message?.content ?? "";
+        messages.push({ role: "assistant", content });
+        addMessage("assistant", content || "[empty response]");
+    } catch (err) {
+        addMessage("assistant", `Error: ${err.message}`);
+    } finally {
+        send.disabled = false;
+        input.focus();
+    }
+}
+
+send.addEventListener("click", submit);
+
+input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        submit();
+    }
+});
+
+clear.addEventListener("click", () => {
+    messages = [];
+    chat.innerHTML = "";
+    input.focus();
+});
+</script>
+</body>
+</html>"#)
+}
+
 // Endpoints
 
 async fn health() -> impl IntoResponse {
@@ -726,6 +901,10 @@ async fn main() -> Result<()> {
     };
 
     let app = Router::new()
+        .route(
+            "/",
+            get(index),
+        )
         .route(
             "/health",
             get(health),
