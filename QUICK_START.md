@@ -63,6 +63,7 @@ ADAPT handles tools, safety, memory, and orchestration
 ```
 
 The server does not maintain conversation state between turns. ADAPT owns conversation history and sends the relevant context with each request.
+The server does include a simple browser based chat interface to test models without tool interaction at http://127.0.0.1:8080/
 
 Enter the server directory:
 
