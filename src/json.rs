@@ -30,10 +30,7 @@ pub async fn handle_json_tool(
                         tool_name
                     );
 
-                    agent.messages.push(serde_json::json!({
-                        "role": &agent.config.messages.tool_role_name,
-                        "content": &error_msg
-                    }));
+                    agent.push_tool_result(&error_msg);
 
                     save_chat_log_message(
                         &agent.home_dir,
@@ -50,10 +47,7 @@ pub async fn handle_json_tool(
                     Ok(result) => {
                         let tool_content = format!("Tool output:\n{}", result);
 
-                        agent.messages.push(serde_json::json!({
-                            "role": &agent.config.messages.tool_role_name,
-                            "content": &tool_content
-                        }));
+                        agent.push_tool_result(&tool_content);
 
                         save_chat_log_message(
                             &agent.home_dir,
@@ -65,10 +59,7 @@ pub async fn handle_json_tool(
                     Err(e) => {
                         let error_msg = format!("Memory Tool error: {}", e);
 
-                        agent.messages.push(serde_json::json!({
-                            "role": &agent.config.messages.tool_role_name,
-                            "content": &error_msg
-                        }));
+                        agent.push_tool_result(&error_msg);
 
                         save_chat_log_message(
                             &agent.home_dir,
@@ -92,10 +83,7 @@ pub async fn handle_json_tool(
 
             let tool_content = format!("Tool output:\n{}", result);
 
-            agent.messages.push(serde_json::json!({
-                "role": &agent.config.messages.tool_role_name,
-                "content": &tool_content
-            }));
+            agent.push_tool_result(&tool_content);
 
             save_chat_log_message(
                 &agent.home_dir,
@@ -106,10 +94,7 @@ pub async fn handle_json_tool(
         Err(e) => {
             let error_msg = format!("JSON Tool error: {}", e);
 
-            agent.messages.push(serde_json::json!({
-                "role": &agent.config.messages.tool_role_name,
-                "content": &error_msg
-            }));
+            agent.push_tool_result(&error_msg);
 
             save_chat_log_message(
                 &agent.home_dir,
@@ -230,42 +215,128 @@ pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, 
         .timeout(Duration::from_secs(30))
         .build()?;
 
-    let response = client.get(url).send().await?;
-    let html = response.text().await?;
+    let response = client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?;
 
+    let final_url = response.url().clone();
+    let html = response.text().await?;
     let document = Html::parse_document(&html);
 
-    let body_selector = Selector::parse("body").unwrap();
-    let text_content = document
-        .select(&body_selector)
-        .next()
-        .map(|body| {
-            body.text()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_else(|| "Could not extract page content.".to_string());
+    // Render readable page content instead of raw HTML/CSS/JS structure.
+    let content_selector = Selector::parse(
+        "h1, h2, h3, h4, h5, h6, p, li, pre, blockquote, td, th, caption, figcaption"
+    ).unwrap();
 
-    let max = max_chars.unwrap_or(8000);
-    let truncated = if text_content.len() > max {
-        let mut end = max.min(text_content.len());
+    let mut blocks = Vec::new();
 
-        while end > 0 && !text_content.is_char_boundary(end) {
-            end -= 1;
+    for element in document.select(&content_selector) {
+        let text = clean_text(&element.text().collect::<Vec<_>>().join(" "));
+
+        if text.is_empty() {
+            continue;
         }
 
-        format!(
-            "{}...\n\n[Content truncated. Page was very long.]",
-            &text_content[..end]
-        )
-    } else {
-        text_content
-    };
+        let rendered = match element.value().name() {
+            "h1" => format!("# {}", text),
+            "h2" => format!("## {}", text),
+            "h3" => format!("### {}", text),
+            "h4" => format!("#### {}", text),
+            "h5" => format!("##### {}", text),
+            "h6" => format!("###### {}", text),
+            "li" => format!("- {}", text),
+            "blockquote" => format!("> {}", text),
+            "pre" => format!("```\n{}\n```", text),
+            _ => text,
+        };
 
-    Ok(truncated)
+        if blocks.last().map(|last| last != &rendered).unwrap_or(true) {
+            blocks.push(rendered);
+        }
+    }
+
+    // Fallback for pages that do not use normal semantic elements.
+    if blocks.is_empty() {
+        let body_selector = Selector::parse("body").unwrap();
+
+        if let Some(body) = document.select(&body_selector).next() {
+            let fallback = clean_text(&body.text().collect::<Vec<_>>().join(" "));
+
+            if !fallback.is_empty() {
+                blocks.push(fallback);
+            }
+        }
+    }
+
+    // Expose links so the model can continue browsing without seeing raw HTML.
+    let link_selector = Selector::parse("a[href]").unwrap();
+    let mut links = Vec::new();
+
+    for link in document.select(&link_selector) {
+        let Some(href) = link.value().attr("href") else {
+            continue;
+        };
+
+        let href = href.trim();
+
+        if href.is_empty()
+            || href.starts_with("javascript:")
+            || href.starts_with("data:")
+        {
+            continue;
+        }
+
+        let label = clean_text(&link.text().collect::<Vec<_>>().join(" "));
+
+        let resolved = final_url
+            .join(href)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| href.to_string());
+
+        let rendered = if label.is_empty() {
+            resolved
+        } else {
+            format!("{} [{}]", label, resolved)
+        };
+
+        if !links.contains(&rendered) {
+            links.push(rendered);
+        }
+    }
+
+    let mut text_content = blocks.join("\n\n");
+
+    if !links.is_empty() {
+        text_content.push_str("\n\nLinks:\n");
+        text_content.push_str(&links.join("\n"));
+    }
+
+    let max = max_chars.unwrap_or(100_000);
+
+    if text_content.len() <= max {
+        return Ok(text_content);
+    }
+
+    let mut end = max.min(text_content.len());
+
+    while end > 0 && !text_content.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    Ok(format!(
+        "{}...\n\n[Content truncated at {} characters. Original extracted length: {} characters.]",
+        &text_content[..end],
+        end,
+        text_content.len()
+    ))
+}
+
+fn clean_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 //  MEMORY TOOL HANDLER
