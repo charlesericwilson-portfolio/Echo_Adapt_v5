@@ -252,6 +252,15 @@ Depending on your sudo cache, one or both prompts may not appear.
 
 ---
 
+## Terminal Hotkeys
+
+ADAPT includes a few built-in terminal shortcuts:
+
+- `Ctrl+Alt+N` — Open a new ADAPT process/tab
+- `Ctrl+C` — Exit the current ADAPT chat
+- `Enter` — Submit the current message
+- `Backspace` — Delete input
+
 ## Something broke?
 
 Open a GitHub issue and include whatever you know:
