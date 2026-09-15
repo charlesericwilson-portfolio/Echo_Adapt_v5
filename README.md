@@ -1018,6 +1018,15 @@ Adapt does not pretend otherwise.
 
 ---
 
+## Terminal Hotkeys
+
+ADAPT includes a few built-in terminal shortcuts:
+
+- `Ctrl+Alt+N` — Open a new ADAPT process/tab
+- `Ctrl+C` — Exit the current ADAPT chat
+- `Enter` — Submit the current message
+- `Backspace` — Delete input
+
 # Defense in Depth
 
 Adapt's security model is intentionally layered.
