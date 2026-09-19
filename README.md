@@ -222,6 +222,47 @@ This keeps provider-specific API behavior from spreading through command executi
 
 ---
 
+## 🚧 Current Development Update: Optional Remote Tool Server
+
+Adapt is currently gaining an **optional embedded tool-server path** for extending JSON tools without hardcoding every external integration into the core runtime.
+
+The initial implementation keeps the existing local JSON tools unchanged and adds a remote fallback path:
+
+```text
+model emits {name, arguments}
+        ↓
+Adapt checks existing local JSON tools
+        ↓
+no local match
+        ↓
+cached remote registry lookup
+        ↓
+POST /execute
+        ↓
+tool server validates and dispatches the registered tool
+        ↓
+result returns to the model as normal tool output
+```
+
+When enabled through `config.toml`, the tool server starts inside the **same Adapt executable**. Adapt performs startup discovery through `GET /tools`, caches the compact registry, and adds the available remote tool names, descriptions, and arguments to the model's system prompt.
+
+The model does **not** need to learn a different protocol for server tools. It continues using the normal Adapt JSON shape:
+
+```json
+{
+  "name": "tool_name",
+  "arguments": {
+    "example": "value"
+  }
+}
+```
+
+The server owns the actual tool implementation and can translate that simple request into whatever API, SDK, database operation, or service-specific format is required.
+
+The current implementation is an **early unauthenticated development version** intended to prove registry discovery, routing, execution, and result return. Authentication, authorization, stronger server-side validation, and database-backed identity/access controls are the next stage of this work. Until those controls are added, the tool server should not be exposed to an untrusted network.
+
+This work is ongoing and may change as the server interface is hardened.
+
 # Architecture
 
 ```mermaid
