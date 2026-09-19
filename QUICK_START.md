@@ -261,6 +261,188 @@ ADAPT includes a few built-in terminal shortcuts:
 - `Enter` — Submit the current message
 - `Backspace` — Delete input
 
+## Optional: Build and Run the Remote Tool Server
+
+The remote tool server is **not required to use Adapt**.
+
+If you only want Adapt's normal local functionality, you can skip this section entirely.
+
+The tool server is intended for developers who want Adapt to call application-specific remote services such as:
+
+* databases
+* internal APIs
+* SaaS platforms
+* ticketing systems
+* remote workflow services
+* other network-accessible application backends
+
+Remote tools are **not automatically available** just because the server is running. A developer must define and register the tools their application needs, including the expected arguments, validation, downstream connection logic, authentication, and response handling.
+
+The tool server runs as a separate process from Adapt.
+
+### 1. Enter the tool-server directory
+
+From the repository root:
+
+```bash
+cd tool_server
+```
+
+### 2. Create the server configuration
+
+If an example configuration is included:
+
+```bash
+cp tool_server.example.toml tool_server.toml
+```
+
+Otherwise create:
+
+```text
+tool_server.toml
+```
+
+A basic development configuration looks like:
+
+```toml
+[server]
+bind_address = "127.0.0.1:9000"
+auth_token = "CHANGE_ME"
+```
+
+The token must match the token configured on the Adapt side.
+
+In Adapt's root `config.toml`:
+
+```toml
+[tool_server]
+enabled = true
+url = "http://127.0.0.1:9000"
+auth_token = "CHANGE_ME"
+```
+
+For real deployments, do not use a trivial development token.
+
+### 3. Build the tool server
+
+From inside `tool_server/`:
+
+```bash
+cargo build --release
+```
+
+The compiled executable is:
+
+```text
+tool_server/target/release/Adapt_tool_server
+```
+
+### 4. Start the tool server
+
+From inside `tool_server/`:
+
+```bash
+./target/release/Adapt_tool_server
+```
+
+The tool server must be running before Adapt starts if remote tool support is enabled.
+
+Adapt performs authenticated tool discovery during startup.
+
+Conceptually:
+
+```text
+Adapt starts
+    ↓
+authenticated GET /tools
+    ↓
+tool server returns registered tool definitions
+    ↓
+Adapt caches the remote registry
+    ↓
+model can call those tools through normal JSON tool syntax
+```
+
+Remote execution uses the same authenticated server connection:
+
+```text
+model requests remote tool
+    ↓
+Adapt checks remote registry
+    ↓
+authenticated POST /execute
+    ↓
+tool server validates and dispatches tool
+    ↓
+remote service
+    ↓
+result returned to Adapt
+```
+
+### 5. Define the tools your project needs
+
+The tool server is not a universal arbitrary-tool executor.
+
+A developer must deliberately implement the remote capabilities their project needs.
+
+Each tool generally needs:
+
+* a tool name
+* a model-facing description
+* expected arguments
+* argument validation
+* remote endpoint, SDK, or database logic
+* server-side credentials
+* request translation
+* response parsing
+* error handling
+
+The model itself continues using the normal Adapt JSON format:
+
+```json
+{
+  "name": "tool_name",
+  "arguments": {
+    "example": "value"
+  }
+}
+```
+
+The tool server owns the translation from that simple request into the downstream API, database, SDK, or service-specific operation.
+
+### 6. Server-side credentials
+
+Credentials for remote services belong on the **tool-server side**, not in the model prompt.
+
+For example:
+
+```text
+Adapt
+    ↓ authenticated request
+Tool Server
+    ├── PostgreSQL credentials
+    ├── Jira credentials
+    ├── GitHub service token
+    └── internal API credentials
+```
+
+Adapt only needs the credential required to authenticate to the tool server itself.
+
+The tool server should only be given access to the remote systems and files required by its registered tools.
+
+### 7. Return to the repository root
+
+When finished:
+
+```bash
+cd ..
+```
+
+You can now start Adapt normally.
+
+If remote tool support is disabled in `config.toml`, Adapt does not require the tool server to be running.
+
+
 ## Something broke?
 
 Open a GitHub issue and include whatever you know:
