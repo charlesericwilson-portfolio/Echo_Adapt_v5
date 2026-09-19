@@ -266,13 +266,12 @@ This work is ongoing and may change as the server interface is hardened.
 # Architecture
 
 ```mermaid
-
+flowchart TD
     A[User Prompt] --> B[Adapt Message History]
     B --> C[Provider Layer]
     C --> D[Main Model]
     D --> E[Provider Response Normalization]
-
-    E --> F{Tool detected?}
+    E --> F{Tool detected}
 
     F -->|Command| G[Command Handler]
     F -->|Session| H[Session Manager]
@@ -282,74 +281,47 @@ This work is ongoing and may change as the server interface is hardened.
 
     G --> L[Safety Check]
     H --> L
-
     L -->|Allowed| M[Linux Shell or tmux]
     L -->|Blocked| N[Tool Error]
 
-    H --> O{Completes quickly?}
+    H --> O{Completes quickly}
     O -->|Yes| P[Tool Output]
     O -->|No| Q[Background Session Supervisor]
-
     Q --> R[Pending Session Event]
     R --> P
 
-    I --> S{Local JSON tool?}
-
-    S -->|Yes| T[Built-in JSON Tool]
-    S -->|No| U{Remote registry match?}
+    I --> S{Local JSON tool match}
+    S -->|Yes| T[Built In JSON Tool]
+    S -->|No| U{Remote registry match}
 
     U -->|No| V[Unknown Tool Error]
-    U -->|Yes| W[POST /execute]
+    U -->|Yes| W[Send name and arguments]
 
-    W --> X[Embedded Tool Server]
+    W --> X[Tool Server Execute Endpoint]
     X --> Y[Server Tool Registry]
     Y --> Z[Registered Tool Handler]
-    Z --> AA[External API SDK DB or Service]
-
+    Z --> AA[External API Database SDK or Service]
     AA --> Z
     Z --> AB[Server Result]
-    AB --> W
-    W --> P
+    AB --> P
 
     T --> P
     V --> P
-    J --> AC[workspace temp]
+    J --> AC[Workspace Temp]
     AC --> P
     M --> P
     N --> P
 
-    P --> AD{Summarizer enabled?}
-
+    P --> AD{Summarizer enabled}
     AD -->|Yes| AE[Small Summarizer Model]
     AD -->|No| AF[Raw Tool Output]
+    AE --> AG[Summarized Tool Result]
 
-    AE --> AG[High Signal Tool Result]
     AF --> B
     AG --> B
-
     Q --> AH[Background Status Tool Message]
     AH --> B
-
-The important distinction is that Adapt now has **two JSON execution paths**:
-
-```mermaid
-JSON tool call
-    ↓
-existing local tool match
-    ├── yes → existing Adapt implementation
-    │
-    └── no → cached remote registry match
-                 ├── no → unknown-tool error
-                 │
-                 └── yes → POST /execute
-                              ↓
-                          tool server
-                              ↓
-                         registered handler
-                              ↓
-                          tool result
 ```
-
 When optional tool-server support is enabled, Adapt also performs a startup discovery path through `GET /tools`. The server-side registry remains authoritative, while Adapt keeps a compact cached registry for model guidance and routing.```
 
 The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
