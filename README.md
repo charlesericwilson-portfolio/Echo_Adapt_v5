@@ -351,7 +351,7 @@ flowchart TD
 
 The important distinction is that Adapt now has **two JSON execution paths**:
 
-```text
+```mermaid
 JSON tool call
     ↓
 existing local tool match
