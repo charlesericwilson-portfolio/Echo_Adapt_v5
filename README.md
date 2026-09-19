@@ -266,6 +266,9 @@ This work is ongoing and may change as the server interface is hardened.
 # Architecture
 
 ```mermaid
+# Architecture
+
+```mermaid
 flowchart TD
     A[User Prompt] --> B[Adapt Message History]
     B --> C[Provider Layer]
@@ -294,28 +297,79 @@ flowchart TD
     R --> S[Safe Model-Loop Boundary]
     S --> P
 
-    I --> T[Web / Memory / Functions]
-    J --> U[workspace/temp]
+    I --> T{Local JSON tool match?}
+
+    T -->|Yes| U[Built-In JSON Tools]
+    T -->|No| V{Remote registry match?}
+
+    V -->|No| W[Unknown Tool Error]
+    V -->|Yes| X[POST /execute]
+
+    X --> TS[Embedded Tool Server]
+    TS --> SR[Server Tool Registry]
+    SR --> TH[Registered Tool Handler]
+    TH --> EXT[External API / SDK / DB / Service]
+    EXT --> TH
+    TH --> TS
+    TS --> X
+    X --> P
+
+    U --> P
+    W --> P
+
+    J --> Y[workspace/temp]
 
     M --> P
-    T --> P
-    U --> P
+    Y --> P
     N --> P
 
-    P --> V{Tool Summarizer enabled?}
+    P --> Z{Tool Summarizer enabled?}
 
-    V -->|Yes| W[Small Summarizer Model]
-    V -->|No| X[Raw Tool Output]
+    Z -->|Yes| AA[Small Summarizer Model]
+    Z -->|No| AB[Raw Tool Output]
 
-    W -->|Success| Y[High-Signal Tool Result]
-    W -->|Failure| X
+    AA -->|Success| AC[High-Signal Tool Result]
+    AA -->|Failure| AB
 
-    Y --> B
-    X --> B
+    AC --> B
+    AB --> B
 
-    Q --> Z[Background Status Tool Message]
-    Z --> B
+    Q --> AD[Background Status Tool Message]
+    AD --> B
+
+    subgraph Startup["Optional Remote Tool Discovery at Startup"]
+        AE[Adapt Startup] --> AF{Tool server enabled?}
+        AF -->|No| AG[Continue with local tools only]
+        AF -->|Yes| AH[Start Embedded Tool Server]
+        AH --> AI[GET /tools]
+        AI --> SR
+        SR --> AJ[Name + Description + Arguments]
+        AJ --> AK[Adapt Remote Tool Registry Cache]
+        AK --> AL[Append Compact Tool Definitions to System Prompt]
+    end
 ```
+
+The important distinction is that Adapt now has **two JSON execution paths**:
+
+```text
+JSON tool call
+    ↓
+existing local tool match
+    ├── yes → existing Adapt implementation
+    │
+    └── no → cached remote registry match
+                 ├── no → unknown-tool error
+                 │
+                 └── yes → POST /execute
+                              ↓
+                          tool server
+                              ↓
+                         registered handler
+                              ↓
+                          tool result
+```
+
+When optional tool-server support is enabled, Adapt also performs a startup discovery path through `GET /tools`. The server-side registry remains authoritative, while Adapt keeps a compact cached registry for model guidance and routing.```
 
 The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
 
