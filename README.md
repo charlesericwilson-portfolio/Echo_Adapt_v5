@@ -265,7 +265,7 @@ This work is ongoing and may change as the server interface is hardened.
 
 # Architecture
 
-flowchart TD
+```mermaid
 
     A[User Prompt] --> B[Adapt Message History]
     B --> C[Provider Layer]
