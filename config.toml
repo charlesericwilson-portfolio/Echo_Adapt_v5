@@ -39,13 +39,17 @@ api_key = ""
 
 [paths]
 home_dir = ""
-context_file = ""
+context_file = "context.txt"
 database = "echo_tools.db"
 memory_file = "memory.md"
 
 [prompts]
 main_system = "main_system.txt"
 summarizer = "summarizer.txt"
+
+[tool_server]
+enabled = true
+url = "http://127.0.0.1:9000"
 
 [messages]
 tool_role_name = "tool"
