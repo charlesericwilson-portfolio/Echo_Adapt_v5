@@ -322,6 +322,10 @@ flowchart TD
     Q --> AH[Background Status Tool Message]
     AH --> B
 ```
+The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
+
+The **model trajectory** and **tool-execution trajectory** can temporarily diverge and later rejoin through a queued completion event.
+
 When optional tool-server support is enabled, Adapt also performs a startup discovery path through `GET /tools`. The server-side registry remains authoritative, while Adapt keeps a compact cached registry for model guidance and routing.
 
 ```mermaid
@@ -338,12 +342,6 @@ flowchart TD
     H --> I[Add Remote Tools to System Prompt]
     I --> J[Start Agent]
 ```
-
-The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
-
-The **model trajectory** and **tool-execution trajectory** can temporarily diverge and later rejoin through a queued completion event.
-
----
 
 # Model Provider Support
 
