@@ -24,7 +24,6 @@ mod supervisor;
 mod providers;
 mod parser;
 mod remote_tools;
-mod tool_server;
 
 use agent::EchoAgent;
 
@@ -37,15 +36,6 @@ async fn main() -> Result<()> {
     let config = config::load_config("config.toml")
         .expect("Failed to load config.toml");
 
-    if config.tool_server.enabled {
-        let bind_address = config
-            .tool_server
-            .url
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
-
-        tool_server::start_tool_server(bind_address).await?;
-    }
     // Create the main agent instance.
     // EchoAgent owns:
     // - The LLM client / message history
