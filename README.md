@@ -265,16 +265,13 @@ This work is ongoing and may change as the server interface is hardened.
 
 # Architecture
 
-```mermaid
-# Architecture
-
-```mermaid
 flowchart TD
+
     A[User Prompt] --> B[Adapt Message History]
     B --> C[Provider Layer]
     C --> D[Main Model]
-
     D --> E[Provider Response Normalization]
+
     E --> F{Tool detected?}
 
     F -->|Command| G[Command Handler]
@@ -286,68 +283,52 @@ flowchart TD
     G --> L[Safety Check]
     H --> L
 
-    L -->|Allowed| M[Linux / Shell / tmux]
+    L -->|Allowed| M[Linux Shell or tmux]
     L -->|Blocked| N[Tool Error]
 
-    H --> O{Session completes quickly?}
+    H --> O{Completes quickly?}
     O -->|Yes| P[Tool Output]
     O -->|No| Q[Background Session Supervisor]
 
-    Q --> R[Pending Session Event Queue]
-    R --> S[Safe Model-Loop Boundary]
-    S --> P
+    Q --> R[Pending Session Event]
+    R --> P
 
-    I --> T{Local JSON tool match?}
+    I --> S{Local JSON tool?}
 
-    T -->|Yes| U[Built-In JSON Tools]
-    T -->|No| V{Remote registry match?}
+    S -->|Yes| T[Built-in JSON Tool]
+    S -->|No| U{Remote registry match?}
 
-    V -->|No| W[Unknown Tool Error]
-    V -->|Yes| X[POST /execute]
+    U -->|No| V[Unknown Tool Error]
+    U -->|Yes| W[POST /execute]
 
-    X --> TS[Embedded Tool Server]
-    TS --> SR[Server Tool Registry]
-    SR --> TH[Registered Tool Handler]
-    TH --> EXT[External API / SDK / DB / Service]
-    EXT --> TH
-    TH --> TS
-    TS --> X
-    X --> P
+    W --> X[Embedded Tool Server]
+    X --> Y[Server Tool Registry]
+    Y --> Z[Registered Tool Handler]
+    Z --> AA[External API SDK DB or Service]
 
-    U --> P
+    AA --> Z
+    Z --> AB[Server Result]
+    AB --> W
     W --> P
 
-    J --> Y[workspace/temp]
-
+    T --> P
+    V --> P
+    J --> AC[workspace temp]
+    AC --> P
     M --> P
-    Y --> P
     N --> P
 
-    P --> Z{Tool Summarizer enabled?}
+    P --> AD{Summarizer enabled?}
 
-    Z -->|Yes| AA[Small Summarizer Model]
-    Z -->|No| AB[Raw Tool Output]
+    AD -->|Yes| AE[Small Summarizer Model]
+    AD -->|No| AF[Raw Tool Output]
 
-    AA -->|Success| AC[High-Signal Tool Result]
-    AA -->|Failure| AB
+    AE --> AG[High Signal Tool Result]
+    AF --> B
+    AG --> B
 
-    AC --> B
-    AB --> B
-
-    Q --> AD[Background Status Tool Message]
-    AD --> B
-
-    subgraph Startup["Optional Remote Tool Discovery at Startup"]
-        AE[Adapt Startup] --> AF{Tool server enabled?}
-        AF -->|No| AG[Continue with local tools only]
-        AF -->|Yes| AH[Start Embedded Tool Server]
-        AH --> AI[GET /tools]
-        AI --> SR
-        SR --> AJ[Name + Description + Arguments]
-        AJ --> AK[Adapt Remote Tool Registry Cache]
-        AK --> AL[Append Compact Tool Definitions to System Prompt]
-    end
-```
+    Q --> AH[Background Status Tool Message]
+    AH --> B
 
 The important distinction is that Adapt now has **two JSON execution paths**:
 
