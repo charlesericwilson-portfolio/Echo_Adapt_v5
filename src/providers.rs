@@ -87,7 +87,6 @@ pub fn extract_response(
 
     text
         .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Model endpoint returned an unexpected response format: {}",

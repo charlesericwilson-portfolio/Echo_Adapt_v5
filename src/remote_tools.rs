@@ -16,11 +16,13 @@ pub struct RemoteToolListResponse {
 
 pub async fn fetch_remote_tools(
     base_url: &str,
+    auth_token: &str,
 ) -> Result<RemoteToolListResponse> {
     let url = format!("{}/tools", base_url.trim_end_matches('/'));
 
     let response = reqwest::Client::new()
         .get(url)
+        .bearer_auth(auth_token)
         .send()
         .await?
         .error_for_status()?;
@@ -34,6 +36,7 @@ pub async fn fetch_remote_tools(
 
 pub async fn call_remote_tool(
     base_url: &str,
+    auth_token: &str,
     tool_name: &str,
     arguments: &serde_json::Value,
 ) -> Result<String> {
@@ -41,6 +44,7 @@ pub async fn call_remote_tool(
 
     let response = reqwest::Client::new()
         .post(url)
+        .bearer_auth(auth_token)
         .json(&serde_json::json!({
             "name": tool_name,
             "arguments": arguments,

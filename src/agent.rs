@@ -60,7 +60,10 @@ impl EchoAgent {
         if config.tool_server.enabled {
             println!("Remote tool support is enabled.");
 
-            match fetch_remote_tools(&config.tool_server.url).await {
+            match fetch_remote_tools(
+                &config.tool_server.url,
+                &config.tool_server.auth_token,
+            ).await {
                 Ok(response) => {
                     remote_tool_registry.load_tools(response.tools);
 

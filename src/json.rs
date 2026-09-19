@@ -81,6 +81,7 @@ pub async fn handle_json_tool(
         enabled_tools,
         &agent.remote_tool_registry,
         &agent.config.tool_server.url,
+        &agent.config.tool_server.auth_token,
     ).await {
         Ok(result) => {
             if let Some(tool_name) = extract_tool_name(json_content) {
@@ -121,6 +122,7 @@ pub async fn handle_json_tool_call_str(
     enabled_tools: &[String],
     remote_registry: &RemoteToolRegistry,
     remote_server_url: &str,
+    auth_token: &str
 ) -> Result<String> {
     let parsed: Value = serde_json::from_str(tool_call)
         .map_err(|e| anyhow::anyhow!("Failed to parse JSON tool call: {}", e))?;
@@ -183,6 +185,7 @@ pub async fn handle_json_tool_call_str(
          _ if remote_registry.contains(tool_name) => {
             call_remote_tool(
                 remote_server_url,
+                auth_token,
                 tool_name,
                 &arguments,
             ).await

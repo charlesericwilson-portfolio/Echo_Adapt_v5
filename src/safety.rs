@@ -123,6 +123,7 @@ mod tests {
             tool_server: ToolServerConfig {
                 enabled: false,
                 url: "http://127.0.0.1:9000".to_string(),
+                auth_token: "123456".to_string(),
             },
         }
     }

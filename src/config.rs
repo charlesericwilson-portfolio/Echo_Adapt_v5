@@ -129,6 +129,9 @@ pub struct ToolServerConfig {
 
     #[serde(default)]
     pub url: String,
+
+    #[serde(default)]
+    pub auth_token: String,
 }
 
 #[derive(Debug, Deserialize)]
