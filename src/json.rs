@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use crate::config::WebSearchConfig;
 use scraper::Html;
 use scraper::Selector;
+use crate::remote_tools::{call_remote_tool, RemoteToolRegistry};
 
 //  MAIN JSON TOOL HANDLER
 pub async fn handle_json_tool(
@@ -74,7 +75,13 @@ pub async fn handle_json_tool(
         }
 
     // Regular tools (passes config)
-    match handle_json_tool_call_str(json_content, agent.config.web_search.as_ref(), enabled_tools).await {
+    match handle_json_tool_call_str(
+        json_content,
+        agent.config.web_search.as_ref(),
+        enabled_tools,
+        &agent.remote_tool_registry,
+        &agent.config.tool_server.url,
+    ).await {
         Ok(result) => {
             if let Some(tool_name) = extract_tool_name(json_content) {
                 println!("{}Echo: [TOOL] {} executed{}",
@@ -112,6 +119,8 @@ pub async fn handle_json_tool_call_str(
     tool_call: &str,
     web_search_config: Option<&WebSearchConfig>,
     enabled_tools: &[String],
+    remote_registry: &RemoteToolRegistry,
+    remote_server_url: &str,
 ) -> Result<String> {
     let parsed: Value = serde_json::from_str(tool_call)
         .map_err(|e| anyhow::anyhow!("Failed to parse JSON tool call: {}", e))?;
@@ -128,8 +137,13 @@ pub async fn handle_json_tool_call_str(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("No tool name found in JSON"))?;
 
-    if !enabled_tools.contains(&tool_name.to_string()) {
-        return Err(anyhow::anyhow!("Tool '{}' is not enabled in config", tool_name));
+    if !enabled_tools.contains(&tool_name.to_string())
+        && !remote_registry.contains(tool_name)
+    {
+        return Err(anyhow::anyhow!(
+            "Tool '{}' is not enabled in config",
+            tool_name
+        ));
     }
 
     let arguments: Value = if function["arguments"].is_string() {
@@ -164,6 +178,14 @@ pub async fn handle_json_tool_call_str(
                 Ok(content) => Ok(format!("Content from {}:\n\n{}", url, content)),
                 Err(e) => Ok(format!("Failed to browse page: {}", e)),
             }
+        }
+
+         _ if remote_registry.contains(tool_name) => {
+            call_remote_tool(
+                remote_server_url,
+                tool_name,
+                &arguments,
+            ).await
         }
 
         _ => Err(anyhow::anyhow!("Unknown JSON tool: {}", tool_name)),

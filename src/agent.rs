@@ -29,6 +29,7 @@ use crate::parser::{extract_last_tool_call, remove_tool_call_for_display, Parsed
 use crate::hotkeys::{self, InputAction};
 use crate::log::{save_chat_log_entry, save_chat_log_message};
 use crate::providers;
+use crate::remote_tools::{fetch_remote_tools, RemoteToolRegistry};
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -45,6 +46,8 @@ pub struct EchoAgent {
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
     pub pending_background_output: Vec<String>,
 
+    pub remote_tool_registry: RemoteToolRegistry,
+
     // Soft duplicate-tool detection. This never blocks execution.
     pub last_tool_signature: Option<String>,
     pub repeated_tool_call_count: u32,
@@ -52,9 +55,31 @@ pub struct EchoAgent {
 
 impl EchoAgent {
     pub async fn new(config: Config) -> Result<Self> {
+        let mut remote_tool_registry = RemoteToolRegistry::new();
+
+        if config.tool_server.enabled {
+            println!("Remote tool support is enabled.");
+
+            match fetch_remote_tools(&config.tool_server.url).await {
+                Ok(response) => {
+                    remote_tool_registry.load_tools(response.tools);
+
+                    println!(
+                        "Loaded {} remote tool(s).",
+                        remote_tool_registry.len()
+                    );
+                }
+
+                Err(error) => {
+                    println!(
+                        "⚠️ Remote tool server unavailable: {}",
+                        error
+                    );
+                }
+            }
+        }
         let home_dir = match &config.paths.home_dir {
     Some(path) if !path.trim().is_empty() => PathBuf::from(path),
-
         _ => dirs::home_dir().ok_or_else(|| {
             anyhow::anyhow!(
                 "Unable to determine the current user's home directory. \
@@ -106,8 +131,19 @@ impl EchoAgent {
             .await
             .expect("Failed to read main system prompt");
 
-        let full_system_prompt = format!("{}\n\n{}", main_prompt.trim(), context_content.trim());
-        messages.push(json!({"role": "system", "content": full_system_prompt}));
+        let remote_tools_prompt = remote_tool_registry.prompt_text();
+
+        let full_system_prompt = format!(
+            "{}\n\n{}\n\n{}",
+            main_prompt.trim(),
+            remote_tools_prompt.trim(),
+            context_content.trim()
+        );
+
+        messages.push(json!({
+            "role": "system",
+            "content": full_system_prompt
+        }));
 
         let initial_counter: u32 = 0;
         let active_sessions = Arc::new(Mutex::new(HashMap::new()));
@@ -121,6 +157,7 @@ impl EchoAgent {
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_background_output: Vec::new(),
+            remote_tool_registry,
             last_tool_signature: None,
             repeated_tool_call_count: 0,
         };
@@ -347,6 +384,25 @@ let trimmed_input = user_input.trim();
             }
 
             // No tool call in this turn: this is the final assistant response.
+            //
+            // If a background session completed and there was no normal tool result
+            // available to piggyback on, deliver the pending background output as its
+            // own tool message and give the model another turn to react to it.
+            if !self.pending_background_output.is_empty() {
+                let background = self
+                    .pending_background_output
+                    .join("\n\n---\n\n");
+
+                self.pending_background_output.clear();
+
+                self.messages.push(json!({
+                    "role": &self.config.messages.tool_role_name,
+                    "content": background
+                }));
+
+                continue;
+            }
+
             let total_chars: usize = self.messages.iter()
                 .map(|m| m["content"].as_str().unwrap_or("").len())
                 .sum();

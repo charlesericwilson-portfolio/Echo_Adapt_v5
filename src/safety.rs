@@ -71,7 +71,7 @@ mod tests {
     use super::*;
     use crate::config::{Config, SecurityConfig, EndpointConfig, SummarizerConfig,
                         PromptsConfig, ContextConfig, PathsConfig, EmbeddingsConfig,
-                        MessagesConfig, ToolTagsConfig, JsonToolsConfig};
+                        MessagesConfig, ToolTagsConfig, JsonToolsConfig, ToolServerConfig};
 
     fn test_config() -> Config {
         Config {
@@ -120,6 +120,10 @@ mod tests {
                 tool_role_name: "tool".to_string(),
             },
             tool_tags: ToolTagsConfig::default(),
+            tool_server: ToolServerConfig {
+                enabled: false,
+                url: "http://127.0.0.1:9000".to_string(),
+            },
         }
     }
 

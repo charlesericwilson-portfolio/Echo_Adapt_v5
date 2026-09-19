@@ -122,6 +122,14 @@ pub struct ContextConfig {
     pub max_turns: u32,
 }
 
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ToolServerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub url: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -138,6 +146,8 @@ pub struct Config {
     pub messages: MessagesConfig,
     #[serde(default)]
     pub tool_tags: ToolTagsConfig,
+    #[serde(default)]
+    pub tool_server: ToolServerConfig,
 
 }
 
