@@ -13,11 +13,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use crate::registry::ServerToolRegistry;
+use crate::config::TavilySection;
+use crate::tools::web_search;
 
 #[derive(Clone)]
 struct ToolServerState {
     registry: Arc<ServerToolRegistry>,
     auth_token: String,
+    tavily: TavilySection,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let bind_address = &config.server.bind_address;
 
     let registry = Arc::new(ServerToolRegistry::new());
-    let state = ToolServerState { registry, auth_token: config.server.auth_token.clone(), };
+    let state = ToolServerState { registry, auth_token: config.server.auth_token.clone(), tavily: config.tavily.clone(),};
 
     let app = Router::new()
         .route("/tools", get(list_tools))
@@ -111,6 +114,10 @@ async fn execute_tool(
         .unwrap_or(false);
 
     if !authorized {
+        println!(
+            "[AUTH] DENIED execute request for tool: {}",
+            request.name
+        );
         return (
             StatusCode::UNAUTHORIZED,
             Json(ExecuteResponse {
@@ -119,6 +126,11 @@ async fn execute_tool(
             }),
         );
     }
+
+    println!(
+        "[AUTH] SUCCESS execute request for tool: {}",
+        request.name
+    );
 
     let Some(tool) = state.registry.get(&request.name) else {
         return (
@@ -129,6 +141,40 @@ async fn execute_tool(
             }),
         );
     };
+
+   if request.name == "web_search" {
+    let query = match request.arguments["query"].as_str() {
+        Some(query) => query,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ExecuteResponse {
+                    result: None,
+                    error: Some("Missing 'query' argument".to_string()),
+                }),
+            );
+        }
+    };
+
+    return match web_search(query, &state.tavily).await {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(ExecuteResponse {
+                result: Some(result),
+                error: None,
+            }),
+        ),
+
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ExecuteResponse {
+                result: None,
+                error: Some(error.to_string()),
+            }),
+        ),
+    };
+}
+
 
     match (tool.execute)(&request.arguments) {
         Ok(result) => (
