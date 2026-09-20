@@ -144,7 +144,7 @@ pub async fn summarize_context(messages: &mut Vec<Value>, config: &Config) -> Re
         &config.endpoint,
         &summary_messages,
         0.3,
-        1024,
+        config.context.max_summary,
     ) {
         Ok(payload) => payload,
 

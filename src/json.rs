@@ -163,9 +163,13 @@ pub async fn handle_json_tool_call_str(
             Ok(format!("Current datetime: {}", now.format("%Y-%m-%d %H:%M:%S %Z")))
         }
 
-        "web_search" => {
+        "web_search" if web_search_config
+            .map(|config| config.enabled)
+            .unwrap_or(false) =>
+        {
             let query = arguments["query"].as_str().unwrap_or("No query provided");
-            let config = web_search_config.ok_or_else(|| anyhow::anyhow!("Web search not configured"))?;
+            let config = web_search_config
+                .ok_or_else(|| anyhow::anyhow!("Web search not configured"))?;
 
             match web_search(query, config).await {
                 Ok(results) => Ok(format!("Web search results for '{}':\n\n{}", query, results)),

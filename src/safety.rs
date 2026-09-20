@@ -106,6 +106,7 @@ mod tests {
             },
             context: ContextConfig {
                 summarize_threshold: 100000,
+                max_summary: 10000,
                 max_turns: 15,
             },
             paths: PathsConfig {

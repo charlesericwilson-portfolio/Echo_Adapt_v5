@@ -76,6 +76,7 @@ pub struct PathsConfig {
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct WebSearchConfig {
+    pub enabled: bool,
     pub url: String,
     #[serde(default)]
     pub api_key: Option<String>,
@@ -119,6 +120,7 @@ pub struct SecurityConfig {
 #[derive(Debug, Deserialize)]
 pub struct ContextConfig {
     pub summarize_threshold: usize,
+    pub max_summary: u32,
     pub max_turns: u32,
 }
 

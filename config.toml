@@ -34,12 +34,13 @@ url = "http://localhost:8080/v1/chat/completions"  # or same as main if using ch
 model = "Echo"  # or a dedicated embedding model
 
 [web_search]
+enabled = false
 url = "https://api.tavily.com/search"
-api_key = ""
+api_key = "Redacted"
 
 [paths]
 home_dir = ""
-context_file = ""
+context_file = "/home/eric/Documents/echo_context.txt"
 database = "echo_tools.db"
 memory_file = "memory.md"
 
@@ -50,7 +51,7 @@ summarizer = "summarizer.txt"
 [tool_server]
 enabled = true
 url = "http://127.0.0.1:9000"
-auth_token = "123456"
+auth_token = ""
 
 [messages]
 tool_role_name = "tool"
@@ -75,7 +76,8 @@ enabled = [
 ]
 
 [context]
-summarize_threshold = 180000
+summarize_threshold = 260000
+max_summary = 10000
 max_turns = 15 # max_turns = X   # Number of model-only turns allowed before triggering safety pause
 
 [security]
