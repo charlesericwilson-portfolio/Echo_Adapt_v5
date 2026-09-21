@@ -15,6 +15,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 BINARY="$SCRIPT_DIR/target/release/Adapt_v5"
 
+TOOL_SERVER_DIR="$SCRIPT_DIR/tool_server"
+TOOL_SERVER_BINARY="$TOOL_SERVER_DIR/target/release/Adapt_tool_server"
+TOOL_SERVER_HEALTH="http://127.0.0.1:9000/health"
+
 MODEL_HOME="/home/$MODEL_USER"
 MODEL_BINARY="$MODEL_HOME/Adapt_v5"
 MODEL_DB="$MODEL_HOME/echo_tools.db"
@@ -186,7 +190,42 @@ case "${1:-}" in
 
         sudo chmod -R 0755 "$MODEL_WORKSPACE"
 
-       # ----------------------------------------------------
+                # ----------------------------------------------------
+        # Start remote tool server as the signed-in user.
+        # ----------------------------------------------------
+
+        echo "=== Starting Adapt Tool Server ==="
+
+        (
+            cd "$TOOL_SERVER_DIR"
+            exec "$TOOL_SERVER_BINARY"
+        ) &
+
+        TOOL_SERVER_PID=$!
+
+        echo "Waiting for Adapt Tool Server..."
+
+        for _ in {1..50}; do
+            if curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+                echo "Adapt Tool Server ready."
+                break
+            fi
+
+            if ! kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+                echo "ERROR: Adapt Tool Server exited before becoming ready."
+                exit 1
+            fi
+
+            sleep 0.2
+        done
+
+        if ! curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+            echo "ERROR: Adapt Tool Server did not become ready."
+            kill "$TOOL_SERVER_PID" 2>/dev/null || true
+            exit 1
+        fi
+
+        # ----------------------------------------------------
         # Launch Adapt in a new terminal window.
         #
         # sudo -u changes process identity but does not create
@@ -199,7 +238,10 @@ case "${1:-}" in
        echo "=== Launching Echo Adapt v5 as $MODEL_USER ==="
         echo "Terminal: $TERMINAL"
 
-        LAUNCH_COMMAND="cd '$MODEL_HOME' && exec sudo -H -u '$MODEL_USER' '$MODEL_BINARY'"
+        DONE_FILE="$(mktemp)"
+        rm -f "$DONE_FILE"
+
+        LAUNCH_COMMAND="cd '$MODEL_HOME'; sudo -H -u '$MODEL_USER' '$MODEL_BINARY'; ADAPT_EXIT=\$?; printf '%s\n' \"\$ADAPT_EXIT\" > '$DONE_FILE'"
 
         case "$TERMINAL" in
 
@@ -229,7 +271,22 @@ case "${1:-}" in
 
         esac
 
-        exit 0
+        echo "Waiting for restricted Adapt to exit..."
+
+        while [[ ! -f "$DONE_FILE" ]]; do
+            sleep 0.5
+        done
+
+        ADAPT_EXIT="$(cat "$DONE_FILE")"
+        rm -f "$DONE_FILE"
+
+        if kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+            echo "=== Stopping Adapt Tool Server ==="
+            kill "$TOOL_SERVER_PID" 2>/dev/null || true
+            wait "$TOOL_SERVER_PID" 2>/dev/null || true
+        fi
+
+        exit "$ADAPT_EXIT"
         ;;
 
     # --------------------------------------------------------
@@ -408,6 +465,41 @@ case "${1:-}" in
 
         HOST_HOME="$HOME"
 
+                # ----------------------------------------------------
+        # Start remote tool server as the signed-in user.
+        # ----------------------------------------------------
+
+        echo "=== Starting Adapt Tool Server ==="
+
+        (
+            cd "$TOOL_SERVER_DIR"
+            exec "$TOOL_SERVER_BINARY"
+        ) &
+
+        TOOL_SERVER_PID=$!
+
+        echo "Waiting for Adapt Tool Server..."
+
+        for _ in {1..50}; do
+            if curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+                echo "Adapt Tool Server ready."
+                break
+            fi
+
+            if ! kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+                echo "ERROR: Adapt Tool Server exited before becoming ready."
+                exit 1
+            fi
+
+            sleep 0.2
+        done
+
+        if ! curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+            echo "ERROR: Adapt Tool Server did not become ready."
+            kill "$TOOL_SERVER_PID" 2>/dev/null || true
+            exit 1
+        fi
+
         echo "=== Launching Echo Adapt v5 in LOCKDOWN mode ==="
         echo "Terminal: $TERMINAL"
         echo "Model user: $MODEL_USER"
@@ -430,10 +522,10 @@ case "${1:-}" in
         #
         # Networking is intentionally NOT unshared.
         # ----------------------------------------------------
-
+        DONE_FILE="$(mktemp)"
+        rm -f "$DONE_FILE"
         LOCKDOWN_COMMAND="
-            cd '$MODEL_HOME' &&
-            exec sudo -H -u '$MODEL_USER' \
+            sudo -H -u '$MODEL_USER' \
             bwrap \
                 --die-with-parent \
                 --new-session \
@@ -463,6 +555,18 @@ case "${1:-}" in
                 --setenv PATH '$MODEL_HOME/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
                 --chdir '$MODEL_HOME' \
                 '$MODEL_BINARY'
+
+                ADAPT_EXIT=\$?
+
+                echo
+                echo \"========================================\"
+                echo \"Adapt exited with code: \$ADAPT_EXIT\"
+                echo \"========================================\"
+
+                printf '%s\n' \"\$ADAPT_EXIT\" > '$DONE_FILE'
+
+                echo
+                read -rp \"Press Enter to close this window...\"
         "
 
         case "$TERMINAL" in
@@ -493,7 +597,22 @@ case "${1:-}" in
 
         esac
 
-        exit 0
+        echo "Waiting for lockdown Adapt to exit..."
+
+        while [[ ! -f "$DONE_FILE" ]]; do
+            sleep 0.5
+        done
+
+        ADAPT_EXIT="$(cat "$DONE_FILE")"
+        rm -f "$DONE_FILE"
+
+        if kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+            echo "=== Stopping Adapt Tool Server ==="
+            kill "$TOOL_SERVER_PID" 2>/dev/null || true
+            wait "$TOOL_SERVER_PID" 2>/dev/null || true
+        fi
+
+        exit "$ADAPT_EXIT"
         ;;
 
     # --------------------------------------------------------
@@ -502,8 +621,54 @@ case "${1:-}" in
 
     "")
 
+        echo "=== Starting Adapt Tool Server ==="
+
+        (
+            cd "$TOOL_SERVER_DIR"
+            exec "$TOOL_SERVER_BINARY"
+        ) &
+
+        TOOL_SERVER_PID=$!
+
+        cleanup_tool_server() {
+            if kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+                echo "=== Stopping Adapt Tool Server ==="
+                kill "$TOOL_SERVER_PID" 2>/dev/null || true
+                wait "$TOOL_SERVER_PID" 2>/dev/null || true
+            fi
+        }
+
+        trap cleanup_tool_server EXIT INT TERM
+
+        echo "Waiting for Adapt Tool Server..."
+
+        for _ in {1..50}; do
+            if curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+                echo "Adapt Tool Server ready."
+                break
+            fi
+
+            if ! kill -0 "$TOOL_SERVER_PID" 2>/dev/null; then
+                echo "ERROR: Adapt Tool Server exited before becoming ready."
+                exit 1
+            fi
+
+            sleep 0.2
+        done
+
+        if ! curl -fsS "$TOOL_SERVER_HEALTH" >/dev/null 2>&1; then
+            echo "ERROR: Adapt Tool Server did not become ready."
+            exit 1
+        fi
+
         echo "=== Running Echo Adapt v5 as $(whoami) ==="
-        exec "$BINARY"
+
+        set +e
+        "$BINARY"
+        ADAPT_EXIT=$?
+        set -e
+
+        exit "$ADAPT_EXIT"
         ;;
 
     # --------------------------------------------------------
