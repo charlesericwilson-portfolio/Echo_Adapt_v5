@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let state = ToolServerState { registry, auth_token: config.server.auth_token.clone(), tavily: config.tavily.clone(),};
 
     let app = Router::new()
+        .route("/health", get(health))
         .route("/tools", get(list_tools))
         .route("/execute", post(execute_tool))
         .with_state(state);
@@ -69,6 +70,10 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn health() -> StatusCode {
+    StatusCode::OK
 }
 
 async fn list_tools(
