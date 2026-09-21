@@ -244,7 +244,7 @@ tool server validates and dispatches the registered tool
 result returns to the model as normal tool output
 ```
 
-When enabled through `config.toml`, the tool server starts inside the **same Adapt executable**. Adapt performs startup discovery through `GET /tools`, caches the compact registry, and adds the available remote tool names, descriptions, and arguments to the model's system prompt.
+When enabled through `config.toml`, the tool server starts inside the same script but separate **Adapt executable**. Adapt performs startup discovery through `GET /tools`, caches the compact registry, and adds the available remote tool names, descriptions, and arguments to the model's system prompt.
 
 The model does **not** need to learn a different protocol for server tools. It continues using the normal Adapt JSON shape:
 
