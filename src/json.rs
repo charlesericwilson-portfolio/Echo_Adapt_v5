@@ -256,7 +256,12 @@ pub async fn browse_page(url: &str, max_chars: Option<usize>) -> Result<String, 
 
     // Render readable page content instead of raw HTML/CSS/JS structure.
     let content_selector = Selector::parse(
-        "h1, h2, h3, h4, h5, h6, p, li, pre, blockquote, td, th, caption, figcaption"
+        "main h1, main h2, main h3, main h4, main h5, main h6,
+        main p, main li, main pre, main blockquote, main td, main th,
+        main caption, main figcaption,
+        article h1, article h2, article h3, article h4, article h5, article h6,
+        article p, article li, article pre, article blockquote, article td,
+        article th, article caption, article figcaption"
     ).unwrap();
 
     let mut blocks = Vec::new();
