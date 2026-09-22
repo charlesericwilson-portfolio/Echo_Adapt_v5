@@ -17,7 +17,9 @@ if command -v apt-get >/dev/null 2>&1; then
         pkg-config \
         python3 \
         python3-venv \
-        cargo
+        cargo \
+        libssl-dev \
+        pkg-config
 
 elif command -v dnf >/dev/null 2>&1; then
     echo "Detected dnf (Fedora/RHEL family)"
