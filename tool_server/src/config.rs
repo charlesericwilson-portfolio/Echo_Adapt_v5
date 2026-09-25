@@ -1,10 +1,20 @@
 use serde::Deserialize;
-use std::fs;
+use std::{collections::HashMap, fs};
 
 #[derive(Debug, Deserialize)]
 pub struct ServerSection {
     pub bind_address: String,
     pub auth_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GlobalSection {
+    pub allowed_tools: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct InstanceSection {
+    pub allowed_tools: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -16,6 +26,8 @@ pub struct TavilySection {
 #[derive(Debug, Deserialize)]
 pub struct ToolServerConfig {
     pub server: ServerSection,
+    pub global: GlobalSection,
+    pub instances: HashMap<String, InstanceSection>,
     pub tavily: TavilySection,
 }
 

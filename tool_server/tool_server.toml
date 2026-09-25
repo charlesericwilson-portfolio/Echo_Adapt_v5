@@ -7,3 +7,9 @@ auth_token = "123456"
 [tavily]
 url = "https://api.tavily.com/search"
 api_key = ""
+
+[global]
+allowed_tools = ["web_search"]
+
+[instances.default]
+allowed_tools = ["echo_message"]

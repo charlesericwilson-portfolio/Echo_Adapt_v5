@@ -13,7 +13,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use crate::registry::ServerToolRegistry;
-use crate::config::TavilySection;
+use crate::config::{InstanceSection, TavilySection};
 use crate::tools::web_search;
 
 #[derive(Clone)]
@@ -21,6 +21,8 @@ struct ToolServerState {
     registry: Arc<ServerToolRegistry>,
     auth_token: String,
     tavily: TavilySection,
+    global_tools: Vec<String>,
+    instances: std::collections::HashMap<String, InstanceSection>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,7 +57,13 @@ async fn main() -> anyhow::Result<()> {
     let bind_address = &config.server.bind_address;
 
     let registry = Arc::new(ServerToolRegistry::new());
-    let state = ToolServerState { registry, auth_token: config.server.auth_token.clone(), tavily: config.tavily.clone(),};
+    let state = ToolServerState {
+        registry,
+        auth_token: config.server.auth_token.clone(),
+        tavily: config.tavily.clone(),
+        global_tools: config.global.allowed_tools,
+        instances: config.instances,
+    };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -92,9 +100,25 @@ async fn list_tools(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    let instance_id = headers
+    .get("x-instance-id")
+    .and_then(|value| value.to_str().ok())
+    .ok_or(StatusCode::BAD_REQUEST)?;
+
+    let instance_tools = state
+    .instances
+    .get(instance_id)
+    .map(|instance| &instance.allowed_tools);
+
     let tools = state
         .registry
         .all()
+        .filter(|tool| {
+            state.global_tools.iter().any(|name| name == tool.name)
+            || instance_tools
+            .map(|allowed| allowed.iter().any(|name| name == tool.name))
+            .unwrap_or(false)
+        })
         .map(|tool| ToolDescription {
             name: tool.name.to_string(),
             description: tool.description.to_string(),
@@ -128,6 +152,57 @@ async fn execute_tool(
             Json(ExecuteResponse {
                 result: None,
                 error: Some("Unauthorized".to_string()),
+            }),
+        );
+    }
+
+    let instance_id = match headers
+    .get("x-instance-id")
+    .and_then(|value| value.to_str().ok())
+    {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ExecuteResponse {
+                    result: None,
+                    error: Some("Missing x-instance-id header".to_string()),
+                }),
+            );
+        }
+    };
+
+    let instance_allowed = state
+    .instances
+    .get(instance_id)
+    .map(|instance| {
+        instance
+        .allowed_tools
+        .iter()
+        .any(|name| name == &request.name)
+    })
+    .unwrap_or(false);
+
+    let global_allowed = state
+    .global_tools
+    .iter()
+    .any(|name| name == &request.name);
+
+    if !global_allowed && !instance_allowed {
+        println!(
+            "[AUTH] DENIED instance '{}' access to tool: {}",
+            instance_id,
+            request.name
+        );
+
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ExecuteResponse {
+                result: None,
+                error: Some(format!(
+                    "Tool '{}' is not allowed for instance '{}'",
+                    request.name, instance_id
+                )),
             }),
         );
     }
