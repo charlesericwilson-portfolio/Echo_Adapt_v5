@@ -125,6 +125,7 @@ mod tests {
                 enabled: false,
                 url: "http://127.0.0.1:9000".to_string(),
                 auth_token: "123456".to_string(),
+                instance_id: "default".to_string(),
             },
         }
     }
