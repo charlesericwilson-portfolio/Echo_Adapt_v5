@@ -52,6 +52,7 @@ summarizer = "summarizer.txt"
 enabled = true
 url = "http://127.0.0.1:9000"
 auth_token = ""
+instance_id = "default"
 
 [messages]
 tool_role_name = "tool"
