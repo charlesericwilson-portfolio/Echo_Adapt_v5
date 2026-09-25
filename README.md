@@ -224,29 +224,57 @@ This keeps provider-specific API behavior from spreading through command executi
 
 ## 🚧 Current Development Update: Optional Remote Tool Server
 
-Adapt is currently gaining an **optional embedded tool-server path** for extending JSON tools without hardcoding every external integration into the core runtime.
+Adapt v5.1 includes an **optional standalone tool server** for extending the runtime with JSON tools without hardcoding every external integration into the main Adapt executable.
 
-The initial implementation keeps the existing local JSON tools unchanged and adds a remote fallback path:
+The tool server runs as a separate Rust executable and maintains its own registry of available tools. Adapt connects to the server at startup, discovers the tools available to its configured instance, caches that compact registry, and exposes those tools to the model through the normal Adapt JSON-tool protocol.
+
+The existing local JSON tools remain unchanged.
 
 ```text
 model emits {name, arguments}
         ↓
 Adapt checks existing local JSON tools
         ↓
-no local match
+local tool enabled?
+   ├── yes → execute locally
+   └── no
         ↓
-cached remote registry lookup
+cached remote registry match?
+   ├── no → unknown tool error
+   └── yes
         ↓
 POST /execute
         ↓
-tool server validates and dispatches the registered tool
+tool server authenticates request
         ↓
-result returns to the model as normal tool output
+tool server checks instance permissions
+        ↓
+registered + permitted tool?
+   ├── no → deny request
+   └── yes
+        ↓
+server dispatches tool
+        ↓
+result returns to Adapt
+        ↓
+normal tool-result message to model
 ```
 
-When enabled through `config.toml`, the tool server starts inside the same script but separate **Adapt executable**. Adapt performs startup discovery through `GET /tools`, caches the compact registry, and adds the available remote tool names, descriptions, and arguments to the model's system prompt.
+### Startup Discovery
 
-The model does **not** need to learn a different protocol for server tools. It continues using the normal Adapt JSON shape:
+When tool-server support is enabled through `config.toml`, Adapt performs startup discovery through:
+
+```text
+GET /tools
+```
+
+The request includes the configured Bearer token and Adapt instance ID.
+
+The tool server uses that identity to return only the tools available to that instance. Adapt then caches the returned names, descriptions, and argument definitions and adds them to the model's available remote-tool context.
+
+The model does **not** need to learn a second tool protocol.
+
+Remote tools use the same JSON format as other Adapt JSON tools:
 
 ```json
 {
@@ -257,92 +285,120 @@ The model does **not** need to learn a different protocol for server tools. It c
 }
 ```
 
-The server owns the actual tool implementation and can translate that simple request into whatever API, SDK, database operation, or service-specific format is required.
+### Server-Side Capability Enforcement
 
-The current implementation is an **early unauthenticated development version** intended to prove registry discovery, routing, execution, and result return. Authentication, authorization, stronger server-side validation, and database-backed identity/access controls are the next stage of this work. Until those controls are added, the tool server should not be exposed to an untrusted network.
+Remote-tool permissions are enforced by the tool server rather than relying on the model prompt or Adapt's cached registry.
 
-This work is ongoing and may change as the server interface is hardened.
+The server supports two permission sources:
 
-# Architecture
-
-```mermaid
-flowchart TD
-    A[User Prompt] --> B[Adapt Message History]
-    B --> C[Provider Layer]
-    C --> D[Main Model]
-    D --> E[Provider Response Normalization]
-    E --> F{Tool detected}
-
-    F -->|Command| G[Command Handler]
-    F -->|Session| H[Session Manager]
-    F -->|JSON| I[JSON Tool Handler]
-    F -->|Cleanup| J[Workspace Cleanup]
-    F -->|No| K[Final Response]
-
-    G --> L[Safety Check]
-    H --> L
-    L -->|Allowed| M[Linux Shell or tmux]
-    L -->|Blocked| N[Tool Error]
-
-    H --> O{Completes quickly}
-    O -->|Yes| P[Tool Output]
-    O -->|No| Q[Background Session Supervisor]
-    Q --> R[Pending Session Event]
-    R --> P
-
-    I --> S{Local JSON tool match}
-    S -->|Yes| T[Built In JSON Tool]
-    S -->|No| U{Remote registry match}
-
-    U -->|No| V[Unknown Tool Error]
-    U -->|Yes| W[Send name and arguments]
-
-    W --> X[Tool Server Execute Endpoint]
-    X --> Y[Server Tool Registry]
-    Y --> Z[Registered Tool Handler]
-    Z --> AA[External API Database SDK or Service]
-    AA --> Z
-    Z --> AB[Server Result]
-    AB --> P
-
-    T --> P
-    V --> P
-    J --> AC[Workspace Temp]
-    AC --> P
-    M --> P
-    N --> P
-
-    P --> AD{Summarizer enabled}
-    AD -->|Yes| AE[Small Summarizer Model]
-    AD -->|No| AF[Raw Tool Output]
-    AE --> AG[Summarized Tool Result]
-
-    AF --> B
-    AG --> B
-    Q --> AH[Background Status Tool Message]
-    AH --> B
-```
-The important distinction is that a persistent session command no longer has to block the main agent trajectory until the command finishes.
-
-The **model trajectory** and **tool-execution trajectory** can temporarily diverge and later rejoin through a queued completion event.
-
-When optional tool-server support is enabled, Adapt also performs a startup discovery path through `GET /tools`. The server-side registry remains authoritative, while Adapt keeps a compact cached registry for model guidance and routing.
-
-```mermaid
-flowchart TD
-    A[Adapt Startup] --> B{Tool Server Enabled}
-
-    B -->|No| C[Continue With Local Tools]
-
-    B -->|Yes| D[Start Embedded Tool Server]
-    D --> E[Request Tool List]
-    E --> F[Server Tool Registry]
-    F --> G[Return Name Description and Arguments]
-    G --> H[Adapt Remote Tool Registry]
-    H --> I[Add Remote Tools to System Prompt]
-    I --> J[Start Agent]
+```text
+global tools
++
+instance-specific tools
+=
+effective tools for that Adapt instance
 ```
 
+Global tools are available to every authenticated instance.
+
+Instance-specific tools are additional capabilities assigned only to a named Adapt instance.
+
+For example:
+
+```toml
+[global]
+allowed_tools = ["web_search"]
+
+[instances.default]
+allowed_tools = ["echo_message"]
+```
+
+In this configuration:
+
+```text
+default
+    ├── web_search       global
+    └── echo_message     instance-specific
+
+other / unknown instance
+    └── web_search       global
+```
+
+The same permission rule is applied independently to both discovery and execution.
+
+`GET /tools` controls which remote tools Adapt discovers.
+
+`POST /execute` performs the authorization check again before dispatching the requested tool.
+
+This means hiding a tool from discovery is **not** treated as the security boundary. A client that manually attempts to call a registered but unauthorized tool is still denied by the server.
+
+### Adapt Instance Configuration
+
+Each Adapt runtime identifies itself through the normal Adapt configuration:
+
+```toml
+[tool_server]
+enabled = true
+url = "http://127.0.0.1:9000"
+auth_token = "YOUR_TOOL_SERVER_TOKEN"
+instance_id = "default"
+```
+
+The `instance_id` selects the server-side capability set for that Adapt instance.
+
+It is an identifier, not a separate secret.
+
+The Bearer token authenticates access to the tool server, while the server-side instance configuration determines which registered capabilities that instance may use.
+
+### External Credentials Stay Server-Side
+
+One purpose of the tool server is to separate model/runtime access from credentials required by external services.
+
+For example:
+
+```text
+model
+  ↓
+Adapt
+  ↓
+tool server
+  ↓
+external API
+```
+
+The model can request a permitted capability without needing direct access to the external service's API key.
+
+The server can therefore expose a narrow operation such as:
+
+```text
+web_search(query)
+```
+
+without exposing the underlying Tavily credential to Adapt or the model.
+
+This pattern can also be used for future database, API, SDK, or service integrations.
+
+The intended design is to expose **specific capabilities**, not generic unrestricted passthrough interfaces.
+
+### Authentication and Trust Boundary
+
+The current tool server uses Bearer authentication for `/tools` and `/execute`.
+
+`/health` remains available for launcher/startup health checks.
+
+The server is currently designed primarily as a local execution service and defaults to:
+
+```text
+127.0.0.1:9000
+```
+
+It should not be treated as a hardened public network service.
+
+The important security boundary is capability enforcement: even if an Adapt instance knows the server address, its instance ID, and the shared server token, `/execute` still checks whether that instance is permitted to use the requested tool.
+
+External-service credentials remain on the tool-server side.
+
+This architecture is intentionally small. It currently avoids introducing per-instance secrets, roles, inheritance systems, wildcard policies, or a larger identity framework where a simple capability mapping is sufficient.
 # Model Provider Support
 
 Adapt v5.1 introduces config-driven provider handling.
