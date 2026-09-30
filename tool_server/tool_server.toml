@@ -13,3 +13,12 @@ allowed_tools = ["web_search"]
 
 [instances.default]
 allowed_tools = ["echo_message"]
+
+[mcp]
+enabled = false
+
+[mcp.servers]
+command = "npx"
+args = ["tsx", ""]
+
+[mcp.servers.env]

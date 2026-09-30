@@ -23,12 +23,35 @@ pub struct TavilySection {
     pub api_key: String,
 }
 
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct McpSection {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub servers: HashMap<String, McpServerSection>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct McpServerSection {
+    pub command: String,
+
+    #[serde(default)]
+    pub args: Vec<String>,
+
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ToolServerConfig {
     pub server: ServerSection,
     pub global: GlobalSection,
     pub instances: HashMap<String, InstanceSection>,
     pub tavily: TavilySection,
+
+    #[serde(default)]
+    pub mcp: McpSection,
 }
 
 pub fn load_config(path: &str) -> Result<ToolServerConfig, Box<dyn std::error::Error>> {

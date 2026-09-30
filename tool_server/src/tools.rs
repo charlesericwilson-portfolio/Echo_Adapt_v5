@@ -4,25 +4,25 @@ use anyhow::Result;
 use crate::config::TavilySection;
 
 pub struct ServerTool {
-    pub name: &'static str,
-    pub description: &'static str,
-    pub arguments: &'static str,
+    pub name: String,
+    pub description: String,
+    pub arguments: String,
     pub execute: fn(&Value) -> Result<String>,
 }
 
 pub fn all_tools() -> Vec<ServerTool> {
     vec![
         ServerTool {
-            name: "echo_message",
-            description: "Return the supplied message",
-            arguments: "message: string",
+            name: "echo_message".to_string(),
+            description: "Return the supplied message".to_string(),
+            arguments: "message: string".to_string(),
             execute: echo_message,
         },
 
         ServerTool {
-            name: "web_search",
-            description: "Search the web for current information",
-            arguments: "query: string",
+            name: "web_search".to_string(),
+            description: "Search the web for current information".to_string(),
+            arguments: "query: string".to_string(),
             execute: remote_only,
         },
     ]

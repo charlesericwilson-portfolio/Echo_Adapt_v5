@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::tools::{all_tools, ServerTool};
 
 pub struct ServerToolRegistry {
-    tools: HashMap<&'static str, ServerTool>,
+    tools: HashMap<String, ServerTool>,
 }
 
 impl ServerToolRegistry {
@@ -11,7 +11,7 @@ impl ServerToolRegistry {
         let mut tools = HashMap::new();
 
         for tool in all_tools() {
-            tools.insert(tool.name, tool);
+            tools.insert(tool.name.clone(), tool);
         }
 
         Self { tools }
@@ -23,5 +23,9 @@ impl ServerToolRegistry {
 
     pub fn all(&self) -> impl Iterator<Item = &ServerTool> {
         self.tools.values()
+    }
+
+    pub fn insert(&mut self, tool: ServerTool) {
+        self.tools.insert(tool.name.clone(), tool);
     }
 }

@@ -1,8 +1,12 @@
 mod registry;
 mod tools;
 mod config;
+mod mcp;
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
 
 use axum::{
     extract::State,
@@ -23,6 +27,7 @@ struct ToolServerState {
     tavily: TavilySection,
     global_tools: Vec<String>,
     instances: std::collections::HashMap<String, InstanceSection>,
+    mcp_connections: Arc<HashMap<String, mcp::McpConnection>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,13 +61,56 @@ async fn main() -> anyhow::Result<()> {
 
     let bind_address = &config.server.bind_address;
 
-    let registry = Arc::new(ServerToolRegistry::new());
+    let mut registry = ServerToolRegistry::new();
+    let mut mcp_connections = HashMap::new();
+
+    if config.mcp.enabled {
+        for (alias, server) in &config.mcp.servers {
+            println!("[MCP] Connecting to server '{}'", alias);
+
+            match mcp::connect_mcp_server(server).await {
+                Ok(connection) => {
+                    println!(
+                        "[MCP] Server '{}' connected successfully with {} tool(s)",
+                        alias,
+                        connection.tools.len()
+                    );
+
+                    for tool in &connection.tools {
+                        let translated = mcp::translate_mcp_tool(alias, tool)?;
+
+                        println!(
+                            "[MCP] Registered '{}' from server '{}'",
+                            translated.name,
+                            alias
+                        );
+
+                        registry.insert(translated);
+                    }
+
+                    mcp_connections.insert(alias.clone(), connection);
+                }
+
+                Err(error) => {
+                    eprintln!(
+                        "[MCP] Failed to connect to server '{}': {}",
+                        alias,
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    let registry = Arc::new(registry);
+
     let state = ToolServerState {
         registry,
         auth_token: config.server.auth_token.clone(),
         tavily: config.tavily.clone(),
         global_tools: config.global.allowed_tools,
         instances: config.instances,
+        mcp_connections: Arc::new(mcp_connections),
     };
 
     let app = Router::new()
@@ -114,9 +162,9 @@ async fn list_tools(
         .registry
         .all()
         .filter(|tool| {
-            state.global_tools.iter().any(|name| name == tool.name)
+            state.global_tools.iter().any(|name| name == &tool.name)
             || instance_tools
-            .map(|allowed| allowed.iter().any(|name| name == tool.name))
+            .map(|allowed| allowed.iter().any(|name| name == &tool.name))
             .unwrap_or(false)
         })
         .map(|tool| ToolDescription {
@@ -221,6 +269,32 @@ async fn execute_tool(
             }),
         );
     };
+
+    if request.name.starts_with("mcp.") {
+        return match mcp::execute_mcp_tool(
+            state.mcp_connections.as_ref(),
+            &request.name,
+            &request.arguments,
+        )
+        .await
+        {
+            Ok(result) => (
+                StatusCode::OK,
+                Json(ExecuteResponse {
+                    result: Some(result),
+                    error: None,
+                }),
+            ),
+
+            Err(error) => (
+                StatusCode::BAD_REQUEST,
+                Json(ExecuteResponse {
+                    result: None,
+                    error: Some(error.to_string()),
+                }),
+            ),
+        };
+    }
 
    if request.name == "web_search" {
     let query = match request.arguments["query"].as_str() {
