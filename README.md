@@ -224,6 +224,8 @@ This keeps provider-specific API behavior from spreading through command executi
 
 ## 🚧 Current Development Update: Optional Remote Tool Server
 
+Current v5.2 development is adding optional Model Context Protocol (MCP) interoperability to the standalone tool server while preserving Adapt's existing tool interface and server-side capability authorization.
+
 Adapt v5.1 includes an **optional standalone tool server** for extending the runtime with JSON tools without hardcoding every external integration into the main Adapt executable.
 
 The tool server runs as a separate Rust executable and maintains its own registry of available tools. Adapt connects to the server at startup, discovers the tools available to its configured instance, caches that compact registry, and exposes those tools to the model through the normal Adapt JSON-tool protocol.
@@ -399,6 +401,29 @@ The important security boundary is capability enforcement: even if an Adapt inst
 External-service credentials remain on the tool-server side.
 
 This architecture is intentionally small. It currently avoids introducing per-instance secrets, roles, inheritance systems, wildcard policies, or a larger identity framework where a simple capability mapping is sufficient.
+
+### MCP Interoperability
+
+The standalone tool server can optionally act as an MCP client, allowing existing MCP servers to expose tools through Adapt without requiring MCP-specific changes to the Adapt runtime or model-facing tool protocol.
+
+Conceptually:
+
+```text
+model
+  ↓
+Adapt JSON tool interface
+  ↓
+tool server
+  ↓
+existing Bearer authentication
+  ↓
+existing global / per-instance authorization
+  ↓
+MCP routing and translation
+  ↓
+external MCP server
+```
+
 # Model Provider Support
 
 Adapt v5.1 introduces config-driven provider handling.
