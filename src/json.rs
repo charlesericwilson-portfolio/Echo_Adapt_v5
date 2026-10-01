@@ -9,6 +9,7 @@ use crate::config::WebSearchConfig;
 use scraper::Html;
 use scraper::Selector;
 use crate::remote_tools::{call_remote_tool, RemoteToolRegistry};
+use crate::supervisor::ToolEvent;
 
 //  MAIN JSON TOOL HANDLER
 pub async fn handle_json_tool(
@@ -74,44 +75,125 @@ pub async fn handle_json_tool(
             }
         }
 
-    // Regular tools (passes config)
-    match handle_json_tool_call_str(
-        json_content,
-        agent.config.web_search.as_ref(),
-        enabled_tools,
-        &agent.remote_tool_registry,
-        &agent.config.tool_server.url,
-        &agent.config.tool_server.auth_token,
-        &agent.config.tool_server.instance_id,
-    ).await {
-        Ok(result) => {
-            if let Some(tool_name) = extract_tool_name(json_content) {
-                println!("{}Echo: [TOOL] {} executed{}",
-                         crate::agent::YELLOW, tool_name, crate::agent::RESET_COLOR);
+        // Regular JSON tools.
+        // Local and remote/server tools both pass through this path.
+
+        let tool_name = extract_tool_name(json_content)
+            .unwrap_or_else(|| "unknown_json_tool".to_string());
+
+        let invocation = json_content.to_string();
+
+        // Clone everything the background future may need so it can be 'static.
+        let json_owned = json_content.to_string();
+        let web_search_config = agent.config.web_search.clone();
+        let enabled_tools_owned = agent.config.json_tools.enabled.clone();
+        let remote_registry = agent.remote_tool_registry.clone();
+        let remote_server_url = agent.config.tool_server.url.clone();
+        let auth_token = agent.config.tool_server.auth_token.clone();
+        let instance_id = agent.config.tool_server.instance_id.clone();
+
+        let mut execution = Box::pin(async move {
+            handle_json_tool_call_str(
+                &json_owned,
+                web_search_config.as_ref(),
+                &enabled_tools_owned,
+                &remote_registry,
+                &remote_server_url,
+                &auth_token,
+                &instance_id,
+            )
+            .await
+        });
+
+        match tokio::time::timeout(
+            Duration::from_secs(5),
+            &mut execution,
+        )
+        .await
+        {
+            Ok(result) => {
+                match result {
+                    Ok(result) => {
+                        println!(
+                            "{}Echo: [TOOL] {} executed{}",
+                            crate::agent::YELLOW,
+                            tool_name,
+                            crate::agent::RESET_COLOR
+                        );
+
+                        let tool_content = format!("Tool output:\n{}", result);
+
+                        agent.push_tool_result(&tool_content);
+
+                        save_chat_log_message(
+                            &agent.home_dir,
+                            &agent.config.messages.tool_role_name,
+                            &tool_content,
+                        )
+                        .await?;
+                    }
+
+                    Err(e) => {
+                        let error_msg = format!("JSON Tool error: {}", e);
+
+                        agent.push_tool_result(&error_msg);
+
+                        save_chat_log_message(
+                            &agent.home_dir,
+                            &agent.config.messages.tool_role_name,
+                            &error_msg,
+                        )
+                        .await?;
+                    }
+                }
             }
 
-            let tool_content = format!("Tool output:\n{}", result);
+            Err(_) => {
+                let sender = agent.tool_supervisor.sender();
 
-            agent.push_tool_result(&tool_content);
+                let background_tool_name = tool_name.clone();
+                let background_invocation = invocation.clone();
 
-            save_chat_log_message(
-                &agent.home_dir,
-                &agent.config.messages.tool_role_name,
-                &tool_content,
-            ).await?;
+                tokio::spawn(async move {
+                    let event = match execution.await {
+                        Ok(output) => ToolEvent {
+                            tool_name: background_tool_name,
+                            invocation: background_invocation,
+                            output,
+                        },
+
+                        Err(error) => ToolEvent {
+                            tool_name: background_tool_name,
+                            invocation: background_invocation,
+                            output: format!("JSON tool execution error: {}", error),
+                        },
+                    };
+
+                    let _ = sender.send(event);
+                });
+
+                let tool_content = format!(
+                    "Tool execution has been moved to the background.\n\
+                    Tool: {}\n\
+                    Invocation: {}\n\
+                    Status: BACKGROUNDED\n\
+                    This invocation is already running.\n\
+                    Do not run it again.\n\
+                    Its completed result will be provided in a later tool message.",
+                    tool_name,
+                    invocation
+                );
+
+                agent.push_tool_result(&tool_content);
+
+                save_chat_log_message(
+                    &agent.home_dir,
+                    &agent.config.messages.tool_role_name,
+                    &tool_content,
+                )
+                .await?;
+            }
         }
-        Err(e) => {
-            let error_msg = format!("JSON Tool error: {}", e);
-
-            agent.push_tool_result(&error_msg);
-
-            save_chat_log_message(
-                &agent.home_dir,
-                &agent.config.messages.tool_role_name,
-                &error_msg,
-            ).await?;
-        }
-    }
 
     Ok(())
 }

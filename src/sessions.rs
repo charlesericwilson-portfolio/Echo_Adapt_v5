@@ -10,7 +10,7 @@ use crate::summary::summarize_output;
 use crate::safety::is_command_safe;
 use crate::log::save_chat_log_message;
 
-const SESSION_FOREGROUND_WAIT_MS: u64 = 2_000;
+const SESSION_FOREGROUND_WAIT_MS: u64 = 5_000;
 const SESSION_POLL_INTERVAL_MS: u64 = 500;
 
 fn tmux_session_name(name: &str) -> String {

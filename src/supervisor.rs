@@ -1,5 +1,41 @@
 use std::collections::VecDeque;
 use std::time::Instant;
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedReceiver,
+    UnboundedSender,
+};
+
+#[derive(Debug, Clone)]
+pub struct ToolEvent {
+    pub tool_name: String,
+    pub invocation: String,
+    pub output: String,
+}
+
+pub struct ToolSupervisor {
+    sender: UnboundedSender<ToolEvent>,
+    receiver: UnboundedReceiver<ToolEvent>,
+}
+
+impl ToolSupervisor {
+    pub fn new() -> Self {
+        let (sender, receiver) = unbounded_channel();
+
+        Self {
+            sender,
+            receiver,
+        }
+    }
+
+    pub fn sender(&self) -> UnboundedSender<ToolEvent> {
+        self.sender.clone()
+    }
+
+    pub fn take_pending(&mut self) -> Option<ToolEvent> {
+        self.receiver.try_recv().ok()
+    }
+}
 
 /// A completed command result from a supervised tmux session.
 #[derive(Debug, Clone)]

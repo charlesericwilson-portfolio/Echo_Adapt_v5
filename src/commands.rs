@@ -3,7 +3,10 @@ use serde_json::json;
 use crate::safety::is_command_safe;
 use crate::log::save_chat_log_message;
 use crate::summary::summarize_output;
-
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use crate::supervisor::ToolEvent;
 
 pub async fn handle_command(
     agent: &mut crate::agent::EchoAgent,
@@ -49,60 +52,160 @@ pub async fn handle_command(
     }
 
     // Execute
-    let output_cmd = std::process::Command::new("sh")
+    let child = TokioCommand::new("sh")
         .arg("-c")
         .arg(command.trim())
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to execute '{}': {}", command, e))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!(
+            "Failed to execute '{}': {}",
+            command,
+            e
+        ))?;
 
-    let stdout = String::from_utf8_lossy(&output_cmd.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output_cmd.stderr).to_string();
+    let mut wait_for_output = Box::pin(child.wait_with_output());
 
-    let raw_tool_content = format!(
-    "Tool output from command '{}':\nSTDOUT:\n{}\nSTDERR:\n{}",
-    command.trim(),
-    stdout.trim(),
-    stderr.trim()
-    );
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        &mut wait_for_output,
+    )
+    .await
+    {
+        // Finished inside the 5-second foreground window.
+        Ok(output_result) => {
+            let output_cmd = output_result.map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed while waiting for '{}': {}",
+                    command,
+                    e
+                )
+            })?;
 
-    let model_tool_content = summarize_output(
-        &raw_tool_content,
-        &agent.config
-    ).await?;
+            let stdout =
+                String::from_utf8_lossy(&output_cmd.stdout).to_string();
 
-    // Store in live model context.
-    agent.messages.push(json!({
-        "role": &agent.config.messages.tool_role_name,
-        "content": &model_tool_content
-    }));
+            let stderr =
+                String::from_utf8_lossy(&output_cmd.stderr).to_string();
 
-    // Store the same tool result in the persistent transcript.
-    save_chat_log_message(
-        &agent.home_dir,
-        &agent.config.messages.tool_role_name,
-        &raw_tool_content,
-    ).await?;
+            let raw_tool_content = format!(
+                "Tool output from command '{}':\nSTDOUT:\n{}\nSTDERR:\n{}",
+                command.trim(),
+                stdout.trim(),
+                stderr.trim()
+            );
 
-    // Log tool
-    let summary = if raw_tool_content.len() > 500 {
-        let mut end = 497.min(raw_tool_content.len());
+            let model_tool_content = summarize_output(
+                &raw_tool_content,
+                &agent.config
+            ).await?;
 
-        while end > 0 && !raw_tool_content.is_char_boundary(end) {
-            end -= 1;
+            agent.push_tool_result(&model_tool_content);
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                &raw_tool_content,
+            ).await?;
+
+            let summary = if raw_tool_content.len() > 500 {
+                let mut end = 497.min(raw_tool_content.len());
+
+                while end > 0
+                    && !raw_tool_content.is_char_boundary(end)
+                {
+                    end -= 1;
+                }
+
+                format!("{}...", &raw_tool_content[..end])
+            } else {
+                raw_tool_content.clone()
+            };
+
+            if let Err(e) =
+                agent.db.log_tool_call("command", command, &summary)
+            {
+                println!(
+                    "{}Warning: Failed to log command to DB: {}{}",
+                    crate::agent::YELLOW,
+                    e,
+                    crate::agent::RESET_COLOR
+                );
+            }
+
+            println!(
+                "{}[Tool executed — logged to database]{}",
+                crate::agent::YELLOW,
+                crate::agent::RESET_COLOR
+            );
         }
 
-        format!("{}...", &raw_tool_content[..end])
-    } else {
-        raw_tool_content.clone()
-    };
+        // Still running after 5 seconds.
+        Err(_) => {
+            let sender = agent.tool_supervisor.sender();
+            let background_command = command.trim().to_string();
 
-    if let Err(e) = agent.db.log_tool_call("command", command, &summary) {
-        println!("{}Warning: Failed to log command to DB: {}{}",
-                 crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
+            tokio::spawn(async move {
+                let event = match wait_for_output.await {
+                    Ok(output_cmd) => {
+                        let stdout =
+                            String::from_utf8_lossy(&output_cmd.stdout)
+                                .to_string();
+
+                        let stderr =
+                            String::from_utf8_lossy(&output_cmd.stderr)
+                                .to_string();
+
+                        ToolEvent {
+                            tool_name: "command".to_string(),
+                            invocation: background_command.clone(),
+                            output: format!(
+                                "STDOUT:\n{}\nSTDERR:\n{}",
+                                stdout.trim(),
+                                stderr.trim()
+                            ),
+                        }
+                    }
+
+                    Err(error) => ToolEvent {
+                        tool_name: "command".to_string(),
+                        invocation: background_command.clone(),
+                        output: format!(
+                            "Command execution error: {}",
+                            error
+                        ),
+                    },
+                };
+
+                let _ = sender.send(event);
+            });
+
+            let tool_content = format!(
+                "The command is still running in the background.\n\
+                Command: {}\n\
+                Status: RUNNING\n\
+                Do not run this command again.\n\
+                Do not repeat or replace this command while it is running.\n\
+                Wait for the background completion tool result before taking any action that depends on its output.Either update the user or go to the next available step in the task while you wait.",
+                command.trim()
+            );
+
+            println!(
+                "{}[Command continuing in background]{}",
+                crate::agent::YELLOW,
+                crate::agent::RESET_COLOR
+            );
+
+            agent.push_tool_result(&tool_content);
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                &tool_content,
+            ).await?;
+        }
     }
 
-    println!("{}[Tool executed — logged to database]{}",
-             crate::agent::YELLOW, crate::agent::RESET_COLOR);
+    return Ok(());
 
-    Ok(())
 }

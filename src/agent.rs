@@ -18,11 +18,11 @@ use std::collections::HashMap;
 use dirs_next as dirs;
 use std::sync::atomic::Ordering;
 
-use crate::supervisor::SessionState;
+use crate::supervisor::{SessionState, ToolSupervisor};
 use crate::sessions::start_session_cleanup_task;
 use crate::config::Config;
 use crate::db::ToolDatabase;
-use crate::summary::summarize_context;
+use crate::summary::{summarize_context, summarize_output};
 use crate::sessions::{clean_up_sessions, handle_completed_session_event};
 use crate::cleanup::handle_cleanup;
 use crate::parser::{extract_last_tool_call, remove_tool_call_for_display, ParsedToolCallKind};
@@ -44,6 +44,8 @@ pub struct EchoAgent {
     pub max_turns_counter: u32,
     pub active_sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
+
+    pub tool_supervisor: ToolSupervisor,
     pub pending_background_output: Vec<String>,
 
     pub remote_tool_registry: RemoteToolRegistry,
@@ -151,6 +153,7 @@ impl EchoAgent {
 
         let initial_counter: u32 = 0;
         let active_sessions = Arc::new(Mutex::new(HashMap::new()));
+        let tool_supervisor = ToolSupervisor::new();
 
         let agent = Self {
             config,
@@ -160,6 +163,7 @@ impl EchoAgent {
             max_turns_counter: initial_counter,
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            tool_supervisor,
             pending_background_output: Vec::new(),
             remote_tool_registry,
             last_tool_signature: None,
@@ -258,6 +262,72 @@ let trimmed_input = user_input.trim();
 
             for event in completed_events {
                 handle_completed_session_event(self, event).await?;
+            }
+
+             while let Some(event) = self.tool_supervisor.take_pending() {
+                let output_for_model = match summarize_output(
+                    &event.output,
+                    &self.config,
+                )
+                .await
+                {
+                    Ok(output) => output,
+
+                    Err(error) => {
+                        eprintln!(
+                            "{}Echo: [BACKGROUND SUMMARY ERROR] {}. Using raw output.{}",
+                            YELLOW,
+                            error,
+                            RESET_COLOR
+                        );
+
+                        event.output.clone()
+                    }
+                };
+
+                let tool_content = format!(
+                    "Background tool completed.\n\
+                    Tool: {}\n\
+                    Invocation: {}\n\
+                    Status: COMPLETED\n\
+                    Output:\n{}",
+                    event.tool_name,
+                    event.invocation,
+                    output_for_model
+                );
+
+                // Queue for model context delivery.
+                self.pending_background_output
+                    .push(tool_content.clone());
+
+                // Persist the completed tool message to the JSONL transcript.
+                save_chat_log_message(
+                    &self.home_dir,
+                    &self.config.messages.tool_role_name,
+                    &tool_content,
+                )
+                .await?;
+
+                // Keep a compact durable copy in SQLite for restart recovery.
+                let db_summary: String = event
+                    .output
+                    .chars()
+                    .take(500)
+                    .collect();
+
+                if let Err(error) = self.db.log_tool_call(
+                    &event.tool_name,
+                    &event.invocation,
+                    &db_summary,
+                ) {
+                    eprintln!(
+                        "{}Echo: [BACKGROUND DB ERROR] Failed to log '{}' completion: {}{}",
+                        YELLOW,
+                        event.tool_name,
+                        error,
+                        RESET_COLOR
+                    );
+                }
             }
 
             let payload = providers::build_payload(
@@ -455,9 +525,9 @@ let trimmed_input = user_input.trim();
             }
         }
 
-        if self.repeated_tool_call_count == 2 {
+        if self.repeated_tool_call_count >= 2 {
             Some(
-                "Recovery guidance: You have issued the exact same tool call twice in a row. \
+                "Recovery guidance: You have issued the exact same tool call more than once in a row. \
 If the previous result showed an error, no useful progress, or the same failed outcome, stop and reason about the result before repeating it again. \
 Try a different command, tool, parameter, or approach when appropriate. \
 If repetition is intentional (for example, polling or verifying a changed state), you may continue."
