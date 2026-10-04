@@ -31,96 +31,6 @@ I use Adapt primarily with my own fine-tuned model, **Echo Instroder 14B**, but 
 
 ---
 
-# ⚠️ Important Security Warning: Cloud Models
-
-Adapt can give a model access to local terminal sessions, command output, files, memory, web tools, and other resources available to the Adapt process.
-
-When using a **cloud model provider**, conversation history and tool output returned to the model may leave your computer and be transmitted to that provider.
-
-**If you are working with data that must remain private, confidential, proprietary, regulated, or otherwise local, do not use a cloud model provider for that workflow.**
-
-Use a locally hosted model and local supporting services instead.
-
-This is especially important because tool output may contain information that was never directly typed into the chat, including:
-
-* file contents,
-* paths and filenames,
-* command output,
-* logs,
-* environment information,
-* database output,
-* network information,
-* debugging information,
-* and other machine state visible to the tools you permit Adapt to execute.
-
-Adapt defaults to:
-
-```toml
-provider = "local"
-api_key = ""
-```
-
-Remote providers are opt-in.
-
-Supporting a cloud provider does **not** mean I recommend giving a cloud-hosted model unrestricted access to your machine.
-
-The user is responsible for deciding what trust boundary is appropriate for a particular workflow.
-
----
-
-# ⚠️ I Need Your Feedback
-
-**I only know for certain that Adapt works on my own machine and in the configurations I personally test.**
-
-I develop and test this project primarily on Linux with my own local model stack. I have also used Adapt through **Windows 11 with WSL2**, but Adapt is not intended to run as a native Windows application.
-
-I have added dependency-installation support for several common Linux package managers, but I do **not** have every Linux distribution, model server, cloud provider, terminal emulator, GPU stack, or chat template available for testing.
-
-If you clone this repo and:
-
-* the installer fails,
-* a terminal emulator does not launch correctly,
-* a dependency has a different package name,
-* tmux behaves differently,
-* a path assumption breaks,
-* WSL2 behaves differently on your setup,
-* a model server returns a response Adapt does not expect,
-* a provider changes its API behavior,
-* your model's chat template rejects a configured message role,
-* or anything else works on my PC but not yours,
-
-**please open an issue and tell me what happened.**
-
-Include whatever you know about your:
-
-* operating system / distribution,
-* package manager,
-* terminal emulator,
-* model server or provider,
-* model,
-* configured message role,
-* and error output.
-
-I cannot fix portability problems I do not know exist.
-
-Small reports are useful.
-
-Even:
-
-> "This works on Fedora."
-
-or:
-
-> "This model rejects `role: tool`."
-
-or:
-
-> "Provider X changed its response envelope."
-
-helps.
-
----
-
 # What Adapt Is
 
 Adapt is not intended to be a giant abstraction layer between a model and the operating system.
@@ -221,6 +131,96 @@ normal Adapt tool loop
 This keeps provider-specific API behavior from spreading through command execution, tmux sessions, memory, cleanup, safety, and the rest of the runtime.
 
 ---
+# ⚠️ Important Security Warning: Cloud Models
+
+Adapt can give a model access to local terminal sessions, command output, files, memory, web tools, and other resources available to the Adapt process.
+
+When using a **cloud model provider**, conversation history and tool output returned to the model may leave your computer and be transmitted to that provider.
+
+**If you are working with data that must remain private, confidential, proprietary, regulated, or otherwise local, do not use a cloud model provider for that workflow.**
+
+Use a locally hosted model and local supporting services instead.
+
+This is especially important because tool output may contain information that was never directly typed into the chat, including:
+
+* file contents,
+* paths and filenames,
+* command output,
+* logs,
+* environment information,
+* database output,
+* network information,
+* debugging information,
+* and other machine state visible to the tools you permit Adapt to execute.
+
+Adapt defaults to:
+
+```toml
+provider = "local"
+api_key = ""
+```
+
+Remote providers are opt-in.
+
+Supporting a cloud provider does **not** mean I recommend giving a cloud-hosted model unrestricted access to your machine.
+
+The user is responsible for deciding what trust boundary is appropriate for a particular workflow.
+
+---
+
+# ⚠️ I Need Your Feedback
+
+**I only know for certain that Adapt works on my own machine and in the configurations I personally test.**
+
+I develop and test this project primarily on Linux with my own local model stack. I have also used Adapt through **Windows 11 with WSL2**, but Adapt is not intended to run as a native Windows application.
+
+I have added dependency-installation support for several common Linux package managers, but I do **not** have every Linux distribution, model server, cloud provider, terminal emulator, GPU stack, or chat template available for testing.
+
+If you clone this repo and:
+
+* the installer fails,
+* a terminal emulator does not launch correctly,
+* a dependency has a different package name,
+* tmux behaves differently,
+* a path assumption breaks,
+* WSL2 behaves differently on your setup,
+* a model server returns a response Adapt does not expect,
+* a provider changes its API behavior,
+* your model's chat template rejects a configured message role,
+* or anything else works on my PC but not yours,
+
+**please open an issue and tell me what happened.**
+
+Include whatever you know about your:
+
+* operating system / distribution,
+* package manager,
+* terminal emulator,
+* model server or provider,
+* model,
+* configured message role,
+* and error output.
+
+I cannot fix portability problems I do not know exist.
+
+Small reports are useful.
+
+Even:
+
+> "This works on Fedora."
+
+or:
+
+> "This model rejects `role: tool`."
+
+or:
+
+> "Provider X changed its response envelope."
+
+helps.
+
+---
+
 
 ## 🚧 Current Development Update: Optional Remote Tool Server
 
