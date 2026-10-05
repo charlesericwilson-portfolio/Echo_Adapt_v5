@@ -119,7 +119,15 @@ pub async fn handle_completed_session_event(
         summary
     );
 
-     agent.pending_background_output.push(tool_content.clone());
+     agent.pending_background_output.push(
+        crate::wait::PendingBackgroundOutput {
+            target: crate::wait::WaitTarget::Session {
+                name: event.session_name.clone(),
+                marker_id: event.marker_id,
+            },
+            content: tool_content.clone(),
+        }
+    );
 
     if let Err(e) = agent.db.log_tool_call(&event.session_name, "[background]", &summary) {
         println!("{}Warning: Failed to log background session to DB: {}{}",
@@ -140,6 +148,7 @@ pub async fn execute_in_session(
     active_sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
     name: &str,
     command: String,
+    background_ready: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<SessionExecution> {
     let tmux_name = tmux_session_name(name);
 
@@ -321,6 +330,12 @@ pub async fn execute_in_session(
                                         captured,
                                     );
                                 }
+
+                                background_ready.store(
+                                    true,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+
 
                                 break;
                             }
@@ -563,7 +578,8 @@ pub async fn handle_session_command(
             agent.home_dir.clone(),
             &agent.active_sessions,
             session_name,
-            cmd.to_string()
+            cmd.to_string(),
+            agent.background_ready.clone(),
         ).await?;
 
         match execution {
@@ -596,6 +612,13 @@ pub async fn handle_session_command(
             }
 
             SessionExecution::Background(marker_id) => {
+                agent.last_background_target = Some(
+                    crate::wait::WaitTarget::Session {
+                        name: session_name.to_string(),
+                        marker_id,
+                    }
+                );
+
                 let tool_content = format!(
                     "SESSION '{}' is still running in the background.\n\
                     Marker: {}\n\

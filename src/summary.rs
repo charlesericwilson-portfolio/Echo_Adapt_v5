@@ -4,13 +4,17 @@ use crate::config::Config;
 use crate::providers;
 
 pub async fn summarize_output(raw_output: &str, config: &Config) -> Result<String> {
-    if !config.summarizer.enabled {
-        println!("{}Echo: [SUMMARIZER] Disabled in config — skipping{}",
-                 crate::agent::YELLOW, crate::agent::RESET_COLOR);
-        return Ok(raw_output.to_string());   // return original
+    if raw_output.chars().count() <= config.summarizer.max_raw_output_chars {
+        return Ok(raw_output.to_string());
     }
 
-    if raw_output.chars().count() <= config.summarizer.max_raw_output_chars {
+    if !config.summarizer.enabled {
+        println!(
+            "{}Echo: [SUMMARIZER] Disabled in config — skipping{}",
+            crate::agent::YELLOW,
+            crate::agent::RESET_COLOR
+        );
+
         return Ok(raw_output.to_string());
     }
 

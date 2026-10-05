@@ -2,10 +2,13 @@ use std::io::{self, Write};
 use std::process::Command;
 use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 pub enum InputAction {
     Submit(String),
     NewTab,
+    BackgroundReady,
     Exit,
 }
 
@@ -92,12 +95,31 @@ pub fn spawn_new_adapt_tab() -> io::Result<()> {
     ))
 }
 
-pub fn read_user_input() -> io::Result<InputAction> {
+pub fn read_user_input(
+    background_ready: &AtomicBool,
+) -> io::Result<InputAction> {
     enable_raw_mode()?;
 
     let mut input = String::new();
 
     loop {
+        // If no human text is currently being entered and a background
+        // result has completed, return control to the agent loop.
+        if input.is_empty()
+            && background_ready.load(Ordering::SeqCst)
+        {
+            disable_raw_mode()?;
+            print!("\r\x1b[2K");
+            io::stdout().flush()?;
+            return Ok(InputAction::BackgroundReady);
+        }
+
+        // Do not block forever waiting for a key. Wake periodically so
+        // background completion can reopen the autonomous agent loop.
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+
         if let Event::Key(key) = event::read()? {
             match (key.code, key.modifiers) {
                 // Ctrl+Alt+N = new Adapt process/tab

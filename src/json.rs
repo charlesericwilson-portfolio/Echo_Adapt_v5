@@ -149,10 +149,18 @@ pub async fn handle_json_tool(
             }
 
             Err(_) => {
+                agent.last_background_target = Some(
+                    crate::wait::WaitTarget::Json {
+                        tool_name: tool_name.clone(),
+                        invocation: invocation.clone(),
+                    }
+                );
+
                 let sender = agent.tool_supervisor.sender();
 
                 let background_tool_name = tool_name.clone();
                 let background_invocation = invocation.clone();
+                let background_ready = agent.background_ready.clone();
 
                 tokio::spawn(async move {
                     let event = match execution.await {
@@ -170,6 +178,11 @@ pub async fn handle_json_tool(
                     };
 
                     let _ = sender.send(event);
+
+                    background_ready.store(
+                        true,
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
                 });
 
                 let tool_content = format!(

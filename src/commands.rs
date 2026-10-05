@@ -142,8 +142,15 @@ pub async fn handle_command(
 
         // Still running after 5 seconds.
         Err(_) => {
+            agent.last_background_target = Some(
+                crate::wait::WaitTarget::Command {
+                    invocation: command.trim().to_string(),
+                }
+            );
+
             let sender = agent.tool_supervisor.sender();
             let background_command = command.trim().to_string();
+            let background_ready = agent.background_ready.clone();
 
             tokio::spawn(async move {
                 let event = match wait_for_output.await {
@@ -178,6 +185,11 @@ pub async fn handle_command(
                 };
 
                 let _ = sender.send(event);
+
+                background_ready.store(
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
             });
 
             let tool_content = format!(

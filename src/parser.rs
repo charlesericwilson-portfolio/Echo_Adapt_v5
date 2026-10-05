@@ -22,6 +22,7 @@ pub enum ParsedToolCallKind {
     EndSession(String),
     Json(String),
     Cleanup,
+    Wait,
 }
 
 /// Examine ONLY the current assistant turn and return the last complete,
@@ -56,6 +57,7 @@ pub fn extract_last_tool_call(
     );
 
     collect_cleanup_calls(response_text, &mut candidates);
+    collect_wait_calls(response_text, &mut candidates);
 
     // "Last call" means the call whose opening tag appears latest in the
     // current model turn. end is used only as a deterministic tie-breaker.
@@ -262,6 +264,32 @@ fn collect_cleanup_calls(
 
             candidates.push(ParsedToolCall {
                 kind: ParsedToolCallKind::Cleanup,
+                start,
+                end,
+            });
+
+            search_from = end;
+        }
+    }
+}
+
+fn collect_wait_calls(
+    response_text: &str,
+    candidates: &mut Vec<ParsedToolCall>,
+) {
+    for tag in ["<wait/>", "<wait>"] {
+        let mut search_from = 0;
+
+        while search_from < response_text.len() {
+            let Some(relative_start) = response_text[search_from..].find(tag) else {
+                break;
+            };
+
+            let start = search_from + relative_start;
+            let end = start + tag.len();
+
+            candidates.push(ParsedToolCall {
+                kind: ParsedToolCallKind::Wait,
                 start,
                 end,
             });

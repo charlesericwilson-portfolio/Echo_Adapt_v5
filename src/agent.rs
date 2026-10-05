@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use anyhow::Result;
 use std::collections::HashMap;
 use dirs_next as dirs;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::supervisor::{SessionState, ToolSupervisor};
 use crate::sessions::start_session_cleanup_task;
@@ -30,6 +30,7 @@ use crate::hotkeys::{self, InputAction};
 use crate::log::{save_chat_log_entry, save_chat_log_message};
 use crate::providers;
 use crate::remote_tools::{fetch_remote_tools, RemoteToolRegistry};
+use crate::wait::{WaitTarget, PendingBackgroundOutput};
 
 // Terminal color helpers
 pub const LIGHT_BLUE: &str = "\x1b[94m";
@@ -46,7 +47,9 @@ pub struct EchoAgent {
     pub stop_generation: Arc<std::sync::atomic::AtomicBool>,
 
     pub tool_supervisor: ToolSupervisor,
-    pub pending_background_output: Vec<String>,
+    pub pending_background_output: Vec<PendingBackgroundOutput>,
+    pub last_background_target: Option<WaitTarget>,
+    pub background_ready: Arc<AtomicBool>,
 
     pub remote_tool_registry: RemoteToolRegistry,
 
@@ -154,6 +157,7 @@ impl EchoAgent {
         let initial_counter: u32 = 0;
         let active_sessions = Arc::new(Mutex::new(HashMap::new()));
         let tool_supervisor = ToolSupervisor::new();
+        let background_ready = Arc::new(AtomicBool::new(false));
 
         let agent = Self {
             config,
@@ -164,7 +168,9 @@ impl EchoAgent {
             active_sessions: active_sessions.clone(),
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_supervisor,
+            background_ready,
             pending_background_output: Vec::new(),
+            last_background_target: None,
             remote_tool_registry,
             last_tool_signature: None,
             repeated_tool_call_count: 0,
@@ -196,7 +202,9 @@ impl EchoAgent {
             print!("You: ");
             std::io::stdout().flush()?;
 
-            let user_input = match hotkeys::read_user_input()? {
+            let user_input = match hotkeys::read_user_input(
+                &self.background_ready
+            )? {
             InputAction::NewTab => {
                 hotkeys::spawn_new_adapt_tab()?;
                 continue;
@@ -206,8 +214,32 @@ impl EchoAgent {
             println!("Session ended.");
             save_chat_log_entry(&self.home_dir, "", "", "SESSION_END").await?;
             break;
-        }
+            }
 
+            InputAction::BackgroundReady => {
+                self.background_ready.store(false, Ordering::SeqCst);
+
+                // Pull completed background work into the normal pending-output path.
+                self.collect_background_completions().await?;
+
+                // A stale wake signal must never cause a duplicate model turn.
+                if self.pending_background_output.is_empty() {
+                    continue;
+                }
+
+                self.inject_pending_background_output();
+
+                let final_response = self.process_turn("").await?;
+
+                println!(
+                    "{}Echo:\n{}\n{}",
+                    LIGHT_BLUE,
+                    final_response.trim(),
+                    RESET_COLOR
+                );
+
+                continue;
+            }
 
             InputAction::Submit(input) => input,
         };
@@ -248,87 +280,7 @@ let trimmed_input = user_input.trim();
     async fn process_turn(&mut self, user_input: &str) -> Result<String> {
         loop {
 
-            let mut completed_events = Vec::new();
-
-            {
-                let mut sessions = self.active_sessions.lock().await;
-
-                for state in sessions.values_mut() {
-                    while let Some(event) = state.take_pending() {
-                        completed_events.push(event);
-                    }
-                }
-            }
-
-            for event in completed_events {
-                handle_completed_session_event(self, event).await?;
-            }
-
-             while let Some(event) = self.tool_supervisor.take_pending() {
-                let output_for_model = match summarize_output(
-                    &event.output,
-                    &self.config,
-                )
-                .await
-                {
-                    Ok(output) => output,
-
-                    Err(error) => {
-                        eprintln!(
-                            "{}Echo: [BACKGROUND SUMMARY ERROR] {}. Using raw output.{}",
-                            YELLOW,
-                            error,
-                            RESET_COLOR
-                        );
-
-                        event.output.clone()
-                    }
-                };
-
-                let tool_content = format!(
-                    "Background tool completed.\n\
-                    Tool: {}\n\
-                    Invocation: {}\n\
-                    Status: COMPLETED\n\
-                    Output:\n{}",
-                    event.tool_name,
-                    event.invocation,
-                    output_for_model
-                );
-
-                // Queue for model context delivery.
-                self.pending_background_output
-                    .push(tool_content.clone());
-
-                // Persist the completed tool message to the JSONL transcript.
-                save_chat_log_message(
-                    &self.home_dir,
-                    &self.config.messages.tool_role_name,
-                    &tool_content,
-                )
-                .await?;
-
-                // Keep a compact durable copy in SQLite for restart recovery.
-                let db_summary: String = event
-                    .output
-                    .chars()
-                    .take(500)
-                    .collect();
-
-                if let Err(error) = self.db.log_tool_call(
-                    &event.tool_name,
-                    &event.invocation,
-                    &db_summary,
-                ) {
-                    eprintln!(
-                        "{}Echo: [BACKGROUND DB ERROR] Failed to log '{}' completion: {}{}",
-                        YELLOW,
-                        event.tool_name,
-                        error,
-                        RESET_COLOR
-                    );
-                }
-            }
+            self.collect_background_completions().await?;
 
             let payload = providers::build_payload(
                 &self.config.endpoint,
@@ -452,6 +404,10 @@ let trimmed_input = user_input.trim();
                     ParsedToolCallKind::Cleanup => {
                         handle_cleanup(self, user_input).await?;
                     }
+
+                    ParsedToolCallKind::Wait => {
+                        crate::wait::handle_wait(self).await?;
+                    }
                 }
 
                 continue;
@@ -459,21 +415,9 @@ let trimmed_input = user_input.trim();
 
             // No tool call in this turn: this is the final assistant response.
             //
-            // If a background session completed and there was no normal tool result
-            // available to piggyback on, deliver the pending background output as its
-            // own tool message and give the model another turn to react to it.
-            if !self.pending_background_output.is_empty() {
-                let background = self
-                    .pending_background_output
-                    .join("\n\n---\n\n");
-
-                self.pending_background_output.clear();
-
-                self.messages.push(json!({
-                    "role": &self.config.messages.tool_role_name,
-                    "content": background
-                }));
-
+            // If completed background work is waiting, inject it as the next tool turn
+            // and allow the model to continue autonomously.
+            if self.inject_pending_background_output() {
                 continue;
             }
 
@@ -488,6 +432,123 @@ let trimmed_input = user_input.trim();
             self.max_turns_counter = 0;
             return Ok(response_text);
         }
+    }
+
+    async fn collect_background_completions(&mut self) -> Result<()> {
+        let mut completed_events = Vec::new();
+
+        {
+            let mut sessions = self.active_sessions.lock().await;
+
+            for state in sessions.values_mut() {
+                while let Some(event) = state.take_pending() {
+                    completed_events.push(event);
+                }
+            }
+        }
+
+        for event in completed_events {
+            handle_completed_session_event(self, event).await?;
+        }
+
+        while let Some(event) = self.tool_supervisor.take_pending() {
+            let output_for_model = match summarize_output(
+                &event.output,
+                &self.config,
+            )
+            .await
+            {
+                Ok(output) => output,
+
+                Err(error) => {
+                    eprintln!(
+                        "{}Echo: [BACKGROUND SUMMARY ERROR] {}. Using raw output.{}",
+                        YELLOW,
+                        error,
+                        RESET_COLOR
+                    );
+
+                    event.output.clone()
+                }
+            };
+
+            let tool_content = format!(
+                "Background tool completed.\n\
+                Tool: {}\n\
+                Invocation: {}\n\
+                Status: COMPLETED\n\
+                Output:\n{}",
+                event.tool_name,
+                event.invocation,
+                output_for_model
+            );
+
+            let target = if event.tool_name == "command" {
+                WaitTarget::Command {
+                    invocation: event.invocation.clone(),
+                }
+            } else {
+                WaitTarget::Json {
+                    tool_name: event.tool_name.clone(),
+                    invocation: event.invocation.clone(),
+                }
+            };
+
+            self.pending_background_output.push(
+                PendingBackgroundOutput {
+                    target,
+                    content: tool_content.clone(),
+                }
+            );
+
+            save_chat_log_message(
+                &self.home_dir,
+                &self.config.messages.tool_role_name,
+                &tool_content,
+            )
+            .await?;
+
+            let db_summary: String =
+                event.output.chars().take(500).collect();
+
+            if let Err(error) = self.db.log_tool_call(
+                &event.tool_name,
+                &event.invocation,
+                &db_summary,
+            ) {
+                eprintln!(
+                    "{}Echo: [BACKGROUND DB ERROR] Failed to log '{}' completion: {}{}",
+                    YELLOW,
+                    event.tool_name,
+                    error,
+                    RESET_COLOR
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn inject_pending_background_output(&mut self) -> bool {
+        if self.pending_background_output.is_empty() {
+            return false;
+        }
+
+        let background = self
+            .pending_background_output
+            .iter()
+            .map(|item| item.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+
+        self.pending_background_output.clear();
+
+        self.messages.push(json!({
+            "role": &self.config.messages.tool_role_name,
+            "content": background
+        }));
+
+        true
     }
 
     async fn handle_max_trigger(&mut self) -> Result<()> {
@@ -551,7 +612,12 @@ If repetition is intentional (for example, polling or verifying a changed state)
                 "content": content
             }));
         } else {
-            let extra = self.pending_background_output.join("\n\n---\n\n");
+            let extra = self
+                .pending_background_output
+                .iter()
+                .map(|item| item.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n");
             self.pending_background_output.clear();
 
             self.messages.push(json!({
@@ -577,5 +643,7 @@ fn tool_call_signature(call: &ParsedToolCallKind) -> String {
             format!("json:{}", json_content.trim())
         }
         ParsedToolCallKind::Cleanup => "cleanup".to_string(),
+        ParsedToolCallKind::Wait => "wait".to_string(),
+
     }
 }

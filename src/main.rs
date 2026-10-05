@@ -24,6 +24,7 @@ mod supervisor;
 mod providers;
 mod parser;
 mod remote_tools;
+mod wait;
 
 use agent::EchoAgent;
 
