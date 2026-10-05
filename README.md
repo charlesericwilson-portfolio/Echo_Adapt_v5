@@ -1,282 +1,425 @@
-# If you don't care about the architecture and just want to try it go [HERE](QUICK_START.md)
 # Echo Adapt v5.1
-# ADAPT = Adaptive Digital Agent Protocol & Tools
-### **Local-first agent runtime with asynchronous terminal supervision, configurable model-provider support, and optional Linux isolation**
-This repo is updated almost daily.
-Recent v5.1 work adds tested restricted-user and Bubblewrap lockdown launch modes, improves runtime file staging and permissions, preserves tool-call content correctly when executable tags are stripped from live context, and adds terminal-emulator detection for isolated launches.
 
-**Echo is the model.**
+## ADAPT — Adaptive Digital Agent Protocol & Tools
 
-**Adapt is a local-first Rust runtime for giving language models real operating-system tools, persistent terminal sessions, asynchronous session supervision, structured functions, memory, and controlled access to the machine they are operating.**
+### Local-first Rust agent runtime with persistent terminal sessions, asynchronous tool supervision, configurable model-provider support, remote tools, memory, and optional Linux isolation.
 
-> **Current development version:** Adapt v5.1
-> **Primary platform:** Linux
-> **Windows support:** Windows 11 through WSL2
-> **Native Windows:** Not supported
-> **Development status:** Active / experimental
+> **Just want to try it?** See [QUICK_START.md](QUICK_START.md).
 
-Adapt is the current Rust implementation of my Echo agent runtime.
+**Echo is the model. Adapt is the runtime.**
+
+Adapt gives language models a controlled way to use real operating-system tools over multi-step workflows.
 
 The basic idea is intentionally simple:
 
-> **If a model understands that it should run a shell command, use a persistent terminal, or call a structured function, Adapt gives it a controlled way to actually do it.**
+> **If a model understands that it should run a shell command, use a persistent terminal, or call a structured function, Adapt gives it a way to actually do it.**
 
-Adapt does not require the model to be tied to a large agent framework, provider-specific tool API, or a hardcoded Jinja chat template.
+Adapt is not tied to a large agent framework, a provider-specific tool API, or a hardcoded Jinja chat template.
 
-I use Adapt primarily with my own fine-tuned model, **Echo Instroder 14B**, but fine-tuning is not required. A sufficiently capable instruct or coding model can learn the included protocol from the example system prompt. GPT-OSS compatibility is currently experimental. I am working on adapting its native chat template to better support Adapt's tool protocol and message flow.
+I primarily use it with my own fine-tuned model, **Echo Instroder 14B**, but fine-tuning is not required. A sufficiently capable instruct or coding model can learn the included protocol from the example system prompt.
 
-* [Echo Instroder 14B](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
-* [Echo Training Project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
-* [Echo Project Overview](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview)
+**Current status**
+
+- Primary platform: Linux
+- Windows: Windows 11 through WSL2
+- Native Windows: not supported
+- Development status: active / experimental
+- Current runtime: Adapt v5.1
+- v5.2 development includes continued MCP/tool-server work and runtime improvements
+
+Related projects:
+
+- [Echo Instroder 14B](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
+- [Echo Training Project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
+- [Echo Project Overview](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview)
 
 ---
 
 # What Adapt Is
 
-Adapt is not intended to be a giant abstraction layer between a model and the operating system.
-
-It is closer to an **execution environment for an AI model**.
-
-The model reasons normally, produces a tool request using a small configurable protocol, Adapt executes that request, and execution feedback is returned to the model using a configurable tool message.
-
-The framework handles execution and state.
+Adapt is closer to an **execution environment for an AI model** than a conventional agent abstraction layer.
 
 The model handles reasoning.
 
-For long-running persistent-session commands, execution and model reasoning can temporarily diverge. Adapt can continue supervising the command in the background while returning control to the model, then reintroduce the completed result into model context when it becomes available.
+Adapt handles execution, state, tool boundaries, persistent sessions, background work, memory, logging, provider routing, and the operating-system interface.
 
-That separation is one of the main design goals of the project.
+The normal interaction is:
+
+```text
+user
+  ↓
+assistant reasoning
+  ↓
+tool request
+  ↓
+Adapt executes
+  ↓
+tool result
+  ↓
+assistant reasoning
+```
+
+For long-running work, execution and model reasoning can temporarily diverge. Adapt can move the operation into the background, allow the model to continue working, and later return the completed result as a normal tool observation.
+
+That separation between **reasoning** and **execution state** is one of the main architectural goals of the project.
+
+---
+
+# Architecture
+
+```mermaid
+flowchart TD
+    U[User] --> M[Model]
+
+    M --> P[Adapt Tool Parser]
+
+    P -->|command| C[One-shot OS Command]
+    P -->|session| S[Persistent tmux Session]
+    P -->|JSON| J[Local / Remote JSON Tool]
+    P -->|wait| W[Wait for Specific Background Result]
+    P -->|cleanup| X[Workspace / Task Cleanup]
+
+    C --> F{Finishes in Foreground Window?}
+    S --> F
+    J --> F
+
+    F -->|Yes| R[Tool Result]
+    F -->|No| B[Background Supervisor / Pending Queue]
+
+    B -->|Model has independent work| M
+    B -->|Model calls wait| W
+    W -->|Target completes| R
+
+    B -->|Completion while model active| R
+    B -->|Completion while chat idle| I[Idle Wake]
+    I --> R
+
+    J --> TS[Optional Adapt Tool Server]
+    TS --> AUTH[Server-side Capability Authorization]
+    AUTH --> MCP[Optional MCP Server / External Service]
+    MCP --> R
+
+    R --> SUM[Optional Tool-output Summarization]
+    SUM --> M
+
+    MEM[Semantic Memory] <--> M
+    CFG[config.toml] --> P
+    CFG --> M
+    CFG --> TS
+
+    OS[Linux Permissions / Restricted User / Bubblewrap] --> C
+    OS --> S
+```
 
 ---
 
 # Design Philosophy
 
-Adapt follows a few principles that have remained consistent throughout the Echo project.
+## Let the operating system do operating-system things
 
-### Let the operating system do operating-system things
+Adapt does not try to recreate Linux permissions inside an AI framework.
 
-Instead of trying to recreate Linux permissions inside an agent framework, Adapt can run the model under an actual restricted Linux user.
+It can run under the current user, a dedicated restricted Linux user, or an optional Bubblewrap-isolated environment.
 
-Linux then controls what the process can read, write, execute, and elevate.
+Linux remains the final authority over what the Adapt process can read, write, execute, or elevate.
 
-### Raw commands should remain raw commands
+## Raw commands should remain raw commands
 
-Shell commands do not need to be wrapped in a giant JSON schema.
+Normal CLI commands do not need a giant JSON schema.
 
-Adapt therefore supports direct command tools for normal CLI work and reserves JSON for tools where structured arguments actually make sense.
+Adapt therefore supports direct command execution and reserves structured JSON for tools where structured arguments make sense.
 
-### Persistent tools need persistent sessions
+## Persistent tools need persistent sessions
 
 Programs such as:
 
-* Python REPLs
-* debuggers
-* database shells
-* SSH sessions
-* msfconsole
-* long-running CLI applications
+- Python REPLs
+- debuggers
+- database shells
+- SSH sessions
+- `msfconsole`
+- long-running CLI applications
 
 do not work well as isolated subprocess calls.
 
-Adapt uses **tmux** to provide persistent named sessions.
+Adapt uses named **tmux** sessions when persistent state is required.
 
-### Long-running tools should not unnecessarily block model reasoning
+## Long-running work should not unnecessarily block reasoning
 
-Some commands complete almost immediately.
+Commands receive a short foreground execution window.
 
-Others may take seconds, minutes, or considerably longer.
+If an operation continues running, Adapt can supervise it asynchronously while returning control to the model.
 
-Adapt gives persistent-session commands a short foreground execution window. If the command continues running, Adapt can hand monitoring to an asynchronous supervisor and return control to the model.
+The model can then continue independent work, explicitly wait for a required result, or go idle and be resumed when completed background work becomes available.
 
-The command continues in its tmux session while the model is free to reason about other work.
+## Tool results should be tool results
 
-### Models should receive tool results as tool results
+Adapt supports a configurable tool-message role.
 
-Adapt uses a configurable tool role rather than automatically pretending command output was another human message.
+The human did not produce command output, so Adapt does not need to pretend that tool output was another human message.
 
-This includes execution-state feedback.
+## Configuration should replace recompilation where practical
 
-When a session continues in the background, the model receives a tool message indicating that the command is still active rather than being called again with no environmental response.
+Provider selection, endpoints, prompts, message roles, tool tags, safety rules, enabled JSON tools, context thresholds, summarization, tool-server configuration, and paths are controlled through `config.toml`.
 
-### Configuration should replace recompilation where possible
+## Provider differences should stay out of the agent loop
 
-Endpoints, providers, API keys, tool tags, message roles, prompts, safety rules, enabled JSON tools, summarization, and other runtime behavior are configured through `config.toml`.
+The main agent loop should not need to know whether the model is local, remote, OpenAI-compatible, or accessed through another supported protocol.
 
-### Provider differences should stay out of the agent loop
+Provider-specific request and response handling belongs in the provider layer.
 
-Adapt v5.1 introduces a small provider layer.
+---
 
-The agent loop should not care whether the model is running locally or being reached through a remote API.
+# Core Capabilities
 
-Provider-specific request and response differences are handled before and after the core model call.
+### Execution
+
+- one-shot shell commands
+- configurable command safety checks
+- structured JSON tools
+- configurable tool tags
+- configurable tool-result role
+- one model-generated tool action per model turn
+
+### Persistent terminal sessions
+
+- named tmux sessions
+- session reuse
+- command-specific start/end markers
+- bounded output extraction
+- same-session running-command protection
+- inactive-session cleanup
+- persistent state across tool calls
+
+### Asynchronous execution
+
+- short foreground execution window
+- foreground-to-background handoff
+- background command supervision
+- queued completion events
+- completed-result reinjection
+- idle model wake when background work finishes
+- explicit `<wait/>` for a specific dependency
+
+### Runtime services
+
+- semantic cross-thread memory
+- Markdown-backed memory storage
+- embedding-based retrieval
+- optional tool-output summarization
+- context compression
+- SQLite tool logging
+- JSONL conversation logging
+- optional external context file
+
+### Remote tools
+
+- standalone Rust tool server
+- startup tool discovery
+- server-side capability enforcement
+- global and instance-specific tool permissions
+- external credentials kept server-side
+- optional MCP interoperability
+
+### Isolation
+
+- normal current-user execution
+- dedicated restricted Linux user
+- optional Bubblewrap lockdown
+- configurable deny rules
+- obfuscation checks
+- controlled sudo configuration
+
+---
+
+# Tool Protocol
+
+The default tool syntax is deliberately small.
+
+## One-shot command
+
+```xml
+<command>ls -lah</command>
+```
+
+Use this for ordinary shell commands that do not need persistent terminal state.
+
+## Persistent session
+
+```xml
+<session name="python">python</session>
+```
+
+Subsequent commands can reuse the same session name.
+
+## End session
+
+```xml
+<end_session name="python"/>
+```
+
+Terminates an Adapt-managed persistent session.
+
+## JSON tool
+
+```xml
+<json>
+{
+  "name": "get_current_datetime",
+  "arguments": {}
+}
+</json>
+```
+
+JSON tools are used for structured functions, local integrations, remote tools, memory operations, web operations, and similar capabilities.
+
+Adapt accepts several common JSON function-call envelope styles.
+
+## Wait
+
+```xml
+<wait/>
+```
+
+`<wait/>` is a runtime control action for background work.
+
+It means:
+
+> **The model already knows what it needs to do next, but it requires the result of the most recently relevant backgrounded operation before continuing.**
+
+Adapt blocks on that specific background result rather than waiting for every running operation.
+
+If independent work remains, the model can continue working instead.
+
+If the model goes idle without calling `<wait/>`, completed background results can still reopen the agent loop automatically.
+
+## Cleanup
+
+```xml
+<cleanup/>
+```
+
+Cleanup removes temporary workspace artifacts and acts as a task-cleanup boundary for Adapt-managed temporary state.
+
+Echo is trained to use this behavior directly.
+
+---
+
+# Background Execution
+
+Long-running execution is one of the main differences between Adapt and a simple request/response tool loop.
+
+A tool starts normally.
+
+If it finishes within the foreground window, its result is returned immediately.
+
+If it remains active, Adapt returns a background-status tool message and continues supervising it separately.
 
 Conceptually:
 
 ```text
-Adapt message history
+assistant requests tool
         ↓
-provider handling
+foreground execution window
         ↓
-configured endpoint
+still running
         ↓
-provider response
+background-status tool result
         ↓
-provider handling
-        ↓
-plain assistant response
-        ↓
-normal Adapt tool loop
+model continues reasoning
 ```
 
-This keeps provider-specific API behavior from spreading through command execution, tmux sessions, memory, cleanup, safety, and the rest of the runtime.
-
----
-# ⚠️ Important Security Warning: Cloud Models
-
-Adapt can give a model access to local terminal sessions, command output, files, memory, web tools, and other resources available to the Adapt process.
-
-When using a **cloud model provider**, conversation history and tool output returned to the model may leave your computer and be transmitted to that provider.
-
-**If you are working with data that must remain private, confidential, proprietary, regulated, or otherwise local, do not use a cloud model provider for that workflow.**
-
-Use a locally hosted model and local supporting services instead.
-
-This is especially important because tool output may contain information that was never directly typed into the chat, including:
-
-* file contents,
-* paths and filenames,
-* command output,
-* logs,
-* environment information,
-* database output,
-* network information,
-* debugging information,
-* and other machine state visible to the tools you permit Adapt to execute.
-
-Adapt defaults to:
-
-```toml
-provider = "local"
-api_key = ""
-```
-
-Remote providers are opt-in.
-
-Supporting a cloud provider does **not** mean I recommend giving a cloud-hosted model unrestricted access to your machine.
-
-The user is responsible for deciding what trust boundary is appropriate for a particular workflow.
-
----
-
-# ⚠️ I Need Your Feedback
-
-**I only know for certain that Adapt works on my own machine and in the configurations I personally test.**
-
-I develop and test this project primarily on Linux with my own local model stack. I have also used Adapt through **Windows 11 with WSL2**, but Adapt is not intended to run as a native Windows application.
-
-I have added dependency-installation support for several common Linux package managers, but I do **not** have every Linux distribution, model server, cloud provider, terminal emulator, GPU stack, or chat template available for testing.
-
-If you clone this repo and:
-
-* the installer fails,
-* a terminal emulator does not launch correctly,
-* a dependency has a different package name,
-* tmux behaves differently,
-* a path assumption breaks,
-* WSL2 behaves differently on your setup,
-* a model server returns a response Adapt does not expect,
-* a provider changes its API behavior,
-* your model's chat template rejects a configured message role,
-* or anything else works on my PC but not yours,
-
-**please open an issue and tell me what happened.**
-
-Include whatever you know about your:
-
-* operating system / distribution,
-* package manager,
-* terminal emulator,
-* model server or provider,
-* model,
-* configured message role,
-* and error output.
-
-I cannot fix portability problems I do not know exist.
-
-Small reports are useful.
-
-Even:
-
-> "This works on Fedora."
-
-or:
-
-> "This model rejects `role: tool`."
-
-or:
-
-> "Provider X changed its response envelope."
-
-helps.
-
----
-
-
-## 🚧 Current Development Update: Optional Remote Tool Server
-
-Current v5.2 development is adding optional Model Context Protocol (MCP) interoperability to the standalone tool server while preserving Adapt's existing tool interface and server-side capability authorization.
-
-Adapt v5.1 includes an **optional standalone tool server** for extending the runtime with JSON tools without hardcoding every external integration into the main Adapt executable.
-
-The tool server runs as a separate Rust executable and maintains its own registry of available tools. Adapt connects to the server at startup, discovers the tools available to its configured instance, caches that compact registry, and exposes those tools to the model through the normal Adapt JSON-tool protocol.
-
-The existing local JSON tools remain unchanged.
+The model then has two primary choices:
 
 ```text
-model emits {name, arguments}
+independent work remains
         ↓
-Adapt checks existing local JSON tools
-        ↓
-local tool enabled?
-   ├── yes → execute locally
-   └── no
-        ↓
-cached remote registry match?
-   ├── no → unknown tool error
-   └── yes
-        ↓
-POST /execute
-        ↓
-tool server authenticates request
-        ↓
-tool server checks instance permissions
-        ↓
-registered + permitted tool?
-   ├── no → deny request
-   └── yes
-        ↓
-server dispatches tool
-        ↓
-result returns to Adapt
-        ↓
-normal tool-result message to model
+continue working
 ```
 
-### Startup Discovery
+or:
 
-When tool-server support is enabled through `config.toml`, Adapt performs startup discovery through:
+```text
+this result is now required
+        ↓
+<wait/>
+        ↓
+block until that specific result completes
+```
+
+Background completion does not require the human to manually restart the agent.
+
+If completed work arrives while the chat is idle, Adapt can convert that completion into a tool turn and reopen the model loop.
+
+This preserves the normal semantic sequence:
+
+```text
+assistant
+tool
+assistant
+tool
+assistant
+```
+
+even when the tool operation itself completes asynchronously.
+
+Completion order is determined by the work itself rather than the order in which background jobs were started.
+
+---
+
+# Persistent tmux Sessions
+
+Adapt uses tmux when execution state must survive between commands.
+
+For each requested session, Adapt:
+
+1. creates or reuses an Adapt-managed tmux session,
+2. generates unique command markers,
+3. sends the command,
+4. polls the terminal pane,
+5. extracts only output produced between that command's markers,
+6. returns immediately if execution finishes quickly,
+7. otherwise continues monitoring it asynchronously.
+
+A session with a command already running will not accept another command until that operation finishes.
+
+For parallel work, the model can use separate named sessions.
+
+Example:
+
+```text
+network_scan  → running
+research      → independent session
+python        → independent session
+```
+
+Adapt-managed session names are internally namespaced to avoid collisions between separate Adapt processes.
+
+Sessions are intentionally capable of surviving an Adapt chat restart.
+
+---
+
+# Remote Tool Server and MCP
+
+Adapt includes an optional standalone Rust tool server for capabilities that should not be implemented directly inside the primary runtime.
+
+When enabled, Adapt performs startup discovery through:
 
 ```text
 GET /tools
 ```
 
-The request includes the configured Bearer token and Adapt instance ID.
+and executes permitted remote tools through:
 
-The tool server uses that identity to return only the tools available to that instance. Adapt then caches the returned names, descriptions, and argument definitions and adds them to the model's available remote-tool context.
+```text
+POST /execute
+```
 
-The model does **not** need to learn a second tool protocol.
+The model continues using the normal Adapt JSON tool format.
 
-Remote tools use the same JSON format as other Adapt JSON tools:
+It does **not** need to learn a separate protocol for remote tools.
+
+Example:
 
 ```json
 {
@@ -287,25 +430,21 @@ Remote tools use the same JSON format as other Adapt JSON tools:
 }
 ```
 
-### Server-Side Capability Enforcement
+## Capability authorization
 
-Remote-tool permissions are enforced by the tool server rather than relying on the model prompt or Adapt's cached registry.
+The server maintains its own registry and permission configuration.
 
-The server supports two permission sources:
+Capabilities can be:
 
 ```text
-global tools
+global
 +
-instance-specific tools
+instance-specific
 =
 effective tools for that Adapt instance
 ```
 
-Global tools are available to every authenticated instance.
-
-Instance-specific tools are additional capabilities assigned only to a named Adapt instance.
-
-For example:
+Example:
 
 ```toml
 [global]
@@ -315,28 +454,15 @@ allowed_tools = ["web_search"]
 allowed_tools = ["echo_message"]
 ```
 
-In this configuration:
+`GET /tools` exposes only capabilities available to the requesting instance.
 
-```text
-default
-    ├── web_search       global
-    └── echo_message     instance-specific
+`POST /execute` performs authorization again before dispatching the tool.
 
-other / unknown instance
-    └── web_search       global
-```
+Discovery is therefore **not** treated as the security boundary.
 
-The same permission rule is applied independently to both discovery and execution.
+An unauthorized client cannot gain access simply by manually constructing the tool call.
 
-`GET /tools` controls which remote tools Adapt discovers.
-
-`POST /execute` performs the authorization check again before dispatching the requested tool.
-
-This means hiding a tool from discovery is **not** treated as the security boundary. A client that manually attempts to call a registered but unauthorized tool is still denied by the server.
-
-### Adapt Instance Configuration
-
-Each Adapt runtime identifies itself through the normal Adapt configuration:
+## Instance configuration
 
 ```toml
 [tool_server]
@@ -346,15 +472,15 @@ auth_token = "YOUR_TOOL_SERVER_TOKEN"
 instance_id = "default"
 ```
 
-The `instance_id` selects the server-side capability set for that Adapt instance.
+The Bearer token authenticates access to the server.
 
-It is an identifier, not a separate secret.
+The instance ID selects the configured capability set.
 
-The Bearer token authenticates access to the tool server, while the server-side instance configuration determines which registered capabilities that instance may use.
+The instance ID is an identifier, not an independent secret.
 
-### External Credentials Stay Server-Side
+## External credentials
 
-One purpose of the tool server is to separate model/runtime access from credentials required by external services.
+External API credentials can remain on the tool-server side.
 
 For example:
 
@@ -368,1033 +494,123 @@ tool server
 external API
 ```
 
-The model can request a permitted capability without needing direct access to the external service's API key.
-
-The server can therefore expose a narrow operation such as:
+The model can request:
 
 ```text
 web_search(query)
 ```
 
-without exposing the underlying Tavily credential to Adapt or the model.
+without needing the underlying external-service key.
 
-This pattern can also be used for future database, API, SDK, or service integrations.
+## MCP interoperability
 
-The intended design is to expose **specific capabilities**, not generic unrestricted passthrough interfaces.
+The tool server can optionally act as an MCP client.
 
-### Authentication and Trust Boundary
+This allows existing MCP servers to expose capabilities through Adapt without requiring the main Adapt runtime or the model to switch to an MCP-specific tool grammar.
 
-The current tool server uses Bearer authentication for `/tools` and `/execute`.
+The tool server translates between Adapt's existing JSON interface and the MCP server.
 
-`/health` remains available for launcher/startup health checks.
-
-The server is currently designed primarily as a local execution service and defaults to:
-
-```text
-127.0.0.1:9000
-```
-
-It should not be treated as a hardened public network service.
-
-The important security boundary is capability enforcement: even if an Adapt instance knows the server address, its instance ID, and the shared server token, `/execute` still checks whether that instance is permitted to use the requested tool.
-
-External-service credentials remain on the tool-server side.
-
-This architecture is intentionally small. It currently avoids introducing per-instance secrets, roles, inheritance systems, wildcard policies, or a larger identity framework where a simple capability mapping is sufficient.
-
-### MCP Interoperability
-
-The standalone tool server can optionally act as an MCP client, allowing existing MCP servers to expose tools through Adapt without requiring MCP-specific changes to the Adapt runtime or model-facing tool protocol.
-
-Conceptually:
-
-```text
-model
-  ↓
-Adapt JSON tool interface
-  ↓
-tool server
-  ↓
-existing Bearer authentication
-  ↓
-existing global / per-instance authorization
-  ↓
-MCP routing and translation
-  ↓
-external MCP server
-```
-
-# Model Provider Support
-
-Adapt v5.1 introduces config-driven provider handling.
-
-The goal is **not** to maintain one implementation for every model company.
-
-The goal is to support common API protocols and only add provider-specific behavior where a provider actually requires it.
-
-Current provider values are:
-
-```text
-local
-openai_compatible
-grok
-```
-
-## `local`
-
-Default provider.
-
-Designed for local servers exposing an OpenAI Chat Completions-compatible endpoint.
-
-Examples include:
-
-* llama.cpp
-* vLLM
-* SGLang
-* LM Studio
-* Ollama when using its OpenAI-compatible interface
-* TabbyAPI
-* Aphrodite
-* other compatible local inference servers
-
-The model itself can be whatever the server supports, including families such as Qwen, Llama, Mistral, DeepSeek-derived models, GPT-OSS, and others.
-
-Example:
-
-```toml
-[endpoint]
-provider = "local"
-url = "http://localhost:8080/v1/chat/completions"
-model = "Echo"
-api_key = ""
-temperature = 0.7
-max_tokens = 2048
-```
-
-This is the primary development and testing path.
-
-## `openai_compatible`
-
-Uses the standard OpenAI-style Chat Completions request and response shape with optional Bearer authentication.
-
-This is intended for remote services exposing a compatible interface.
-
-Depending on the provider's current compatibility layer and model behavior, this can include services such as:
-
-* OpenAI
-* Google Gemini through its OpenAI-compatible interface
-* Anthropic Claude through its OpenAI compatibility layer
-* DeepSeek where its compatible message requirements match your configured Adapt message grammar
-* other hosted OpenAI-compatible APIs
-
-Example:
-
-```toml
-[endpoint]
-provider = "openai_compatible"
-url = "PROVIDER_CHAT_COMPLETIONS_ENDPOINT"
-model = "PROVIDER_MODEL_NAME"
-api_key = "YOUR_API_KEY"
-temperature = 0.7
-max_tokens = 2048
-```
-
-### Compatibility does not mean identical behavior
-
-"OpenAI-compatible" does **not** mean every provider behaves identically.
-
-Providers may differ in:
-
-* accepted message roles,
-* tool-result requirements,
-* reasoning features,
-* image handling,
-* supported request fields,
-* context limits,
-* provider-specific functionality,
-* and how closely they follow the compatibility schema.
-
-Adapt intentionally avoids pretending otherwise.
-
-If a provider only requires a different tool-role name, that can often be changed through:
-
-```toml
-[messages]
-tool_role_name = "tool"
-```
-
-If a provider requires a fundamentally different request or response structure, that belongs in the provider layer.
-
-Provider APIs also change over time.
-
-If a currently compatible provider stops working, please open an issue.
-
-## `grok`
-
-The Grok path uses the xAI Responses-style request/response flow rather than the normal Chat Completions envelope.
-
-Adapt previously had a separate Grok proof-of-concept branch.
-
-That branch demonstrated that Adapt's local tool execution loop could be driven by a cloud model.
-
-The provider code has now been moved toward the main runtime so separate provider-specific Adapt forks do not need to be maintained.
-
-### Current Grok testing status
-
-The older Grok proof of concept was successfully used with Adapt tools.
-
-The current v5.1 provider implementation was ported from that experiment, but I have **not** re-tested every current Grok/API behavior against the live service.
-
-Treat Grok support as experimental and report problems.
+The primary Adapt process therefore remains relatively small.
 
 ---
 
-# Provider Testing Status
+# Built-in JSON Tools
 
-| Provider path                          | Status                                                                                                     |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `local`                                | **Actively tested** with my local stack                                                                    |
-| `openai_compatible`                    | **Implemented** using the compatibility protocol; individual cloud providers are not all personally tested |
-| `grok`                                 | **Experimental**; based on a previously working Grok proof of concept                                      |
-| Every Linux/model/provider combination | **Definitely not tested**                                                                                  |
+The current runtime includes structured tools for:
 
-Please do not interpret "supported protocol" as "I personally validated every model and provider combination."
+- `get_current_datetime`
+- `web_search`
+- `browse_page`
+- `append_memory`
+- `read_memory`
 
-I did not.
+Enabled JSON tools are controlled through configuration.
 
-That is one of the reasons I want issue reports from other environments.
+Additional tools can be implemented locally or exposed through the standalone tool server.
+
+The included web search implementation uses Tavily and requires your own API key if enabled.
+
+---
+
+# Model Provider Support
+
+Adapt supports provider **protocols**, not a giant hardcoded list of model brands.
+
+Current provider modes are:
+
+| Provider | Intended use | Status |
+|---|---|---|
+| `local` | Local OpenAI-compatible Chat Completions server | Primary / actively tested |
+| `openai_compatible` | Remote OpenAI-compatible Chat Completions API | Implemented |
+| `grok` | xAI Responses-style path | Experimental |
+
+## Local
+
+The primary development path.
+
+Compatible local serving software may include:
+
+- llama.cpp
+- vLLM
+- SGLang
+- LM Studio
+- Ollama through its OpenAI-compatible interface
+- TabbyAPI
+- Aphrodite
+- other compatible servers
+
+The model itself can be from any family the selected server supports, provided its message/template behavior is compatible with the configured Adapt protocol.
+
+## OpenAI-compatible
+
+Remote APIs exposing a compatible Chat Completions interface can use the generic `openai_compatible` provider path.
+
+Compatibility does **not** guarantee identical behavior.
+
+Providers may differ in:
+
+- accepted message roles
+- reasoning fields
+- tool-result requirements
+- image handling
+- context limits
+- supported request fields
+- response envelopes
+- provider-specific features
+
+If a provider requires a fundamentally different request or response format, that belongs in the provider layer rather than being spread throughout the agent runtime.
+
+## Grok
+
+The Grok provider path was derived from an earlier working proof-of-concept.
+
+Current support should be considered experimental.
 
 ---
 
 # Provider Configuration
 
-The main endpoint configuration now includes the provider and optional API key.
-
 Example:
 
 ```toml
 [endpoint]
-
-# Provider protocol:
-#
-# "local"
-#     Default.
-#     Local OpenAI-compatible servers.
-#     Examples: llama.cpp, vLLM, SGLang, LM Studio.
-#
-# "openai_compatible"
-#     Remote OpenAI-compatible Chat Completions APIs.
-#     Examples may include Gemini, Claude compatibility,
-#     DeepSeek, OpenAI, and other compatible services.
-#
-# "grok"
-#     xAI Responses API.
-#     Experimental.
-#
 provider = "local"
-
 url = "http://localhost:8080/v1/chat/completions"
 model = "Echo"
-
-# Leave empty when authentication is not required.
 api_key = ""
-
 temperature = 0.7
 max_tokens = 2048
 ```
 
-If `provider` is omitted, Adapt defaults to:
+If authentication is not required, `api_key` may remain empty.
 
-```text
-local
-```
-
-If `api_key` is omitted or empty, Adapt does not add Bearer authentication.
-
-This preserves compatibility with existing local configurations.
+Provider endpoints and model identifiers change over time. Check the selected provider's current documentation rather than assuming example URLs remain permanent.
 
 ---
 
-# Context Management and Provider Routing
+# Tool-result Message Role
 
-Conversation-context summarization now uses the same configured provider path as the primary model call.
-
-Conceptually:
-
-```text
-active model context
-        ↓
-configured threshold reached
-        ↓
-fresh summarization request
-        ↓
-same provider / endpoint / model
-        ↓
-compressed conversation summary
-        ↓
-system prompt + summary + recent turns
-```
-
-The summarization request is a **new inference call** containing the conversation that needs to be compressed.
-
-It is not intended to somehow summarize a context window from inside that same already-full inference.
-
-The configured threshold should therefore leave sufficient headroom below the model's actual context limit for:
-
-* the summarization prompt,
-* the conversation being summarized,
-* template/provider overhead,
-* and the generated summary.
-
-If you configure a threshold at or extremely close to the model's maximum context window, the summarization request may fail.
-
-Adapt does not attempt to protect you from every bad configuration value.
-
----
-
-# Optional External Context File
-
-The external context file is optional.
-
-An empty configuration such as:
-
-```toml
-[paths]
-context_file = ""
-```
-
-is valid and simply means no external context file is loaded.
-
-Adapt no longer treats an empty context path as the user's home directory.
-
----
-
-# Tool Protocol
-
-Tool tags are configured in `config.toml`.
-
-The defaults included with the project use formats similar to the following.
-
-## One-Shot Command
-
-```xml
-<command>ls -lah</command>
-```
-
-Use this for normal commands where no persistent process state is required.
-
----
-
-## Persistent Session
-
-```xml
-<session name="python">python</session>
-```
-
-or subsequent commands using the same named session.
-
-Adapt creates or reuses a tmux session and captures the new output produced by the command.
-
-Persistent sessions are useful when state must survive between tool calls.
-
-Commands that exceed the foreground execution window can continue asynchronously under session supervision.
-
----
-
-## End Session
-
-```xml
-<end_session name="python"/>
-```
-
-The model can explicitly terminate a session.
-
-Inactive sessions are also cleaned up automatically after the runtime inactivity period.
-
----
-
-## JSON Tool
-
-```xml
-<json>
-{
-  "name": "get_current_datetime",
-  "arguments": {}
-}
-</json>
-```
-
-Adapt currently understands multiple common JSON function-call envelope styles, including direct function objects and OpenAI-style nested function calls.
-
----
-
-## Cleanup
-
-```xml
-<cleanup/>
-```
-
-This removes the contents of:
-
-```text
-workspace/temp/
-```
-
-The cleanup tool exists so the model can use a temporary scratch area while building a task and clean it when the work is finished without being given a generic destructive file-deletion tool.
-
----
-
-# Tool Execution Flow
-
-A normal synchronous multi-step workflow looks like this:
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant M as Model
-    participant A as Adapt
-    participant T as Tool / OS
-
-    U->>M: Complete a task
-    M->>A: Assistant response + tool tag
-    A->>A: Detect and parse tool request
-    A->>A: Strip executable tag before live-context reinjection
-    A->>T: Execute parsed tool
-    T->>A: Tool output
-    A->>M: tool message
-    M->>A: Next assistant response + tool tag
-    A->>T: Execute next tool
-    T->>A: Tool output
-    A->>M: tool message
-    M->>U: Final response
-```
-
-Adapt accepts **one model-generated tool action per model turn**.
-
-For normal commands and quickly completing session commands, the result is returned before the next model decision.
-
-```text
-assistant tool request
-        ↓
-tool result
-        ↓
-assistant reasoning
-        ↓
-next tool request
-```
-
-Persistent session commands have an additional asynchronous path.
-
-If a session command exceeds the foreground execution window, Adapt can return execution-state feedback to the model while supervising the command independently.
-
-```text
-assistant session request
-        ↓
-command remains active
-        ↓
-tool: session continues in background
-        ↓
-assistant reasoning continues
-        ↓
-background command completes
-        ↓
-completion event queued
-        ↓
-safe model-loop boundary
-        ↓
-completed tool result
-        ↓
-assistant reasoning continues from result
-```
-
-This preserves the action-feedback structure without forcing a long-running terminal command to block the entire model trajectory.
-
----
-
-# Persistent tmux Sessions
-
-Persistent terminal sessions are one of the core parts of Adapt.
-
-When a model requests a named session, Adapt:
-
-1. converts the requested name into an Adapt-specific tmux session name,
-2. creates the session if it does not already exist,
-3. reuses it if it does,
-4. sends the requested command,
-5. inserts unique output markers,
-6. records the command as running,
-7. polls the tmux pane,
-8. captures only the output generated for that command,
-9. returns immediately if the command completes within the foreground window,
-10. otherwise hands monitoring to an asynchronous supervisor,
-11. queues the completed output when the background command eventually finishes,
-12. and returns that result to the model at a safe model-loop boundary.
-
-```mermaid
-flowchart TD
-    A[Model requests named session] --> B{Session exists?}
-
-    B -->|No| C[Create tmux session]
-    B -->|Yes| D[Reuse tmux session]
-
-    C --> E[Send command with unique markers]
-    D --> E
-
-    E --> F[Record running marker]
-    F --> G[Poll tmux pane]
-
-    G --> H{Finished within foreground window?}
-
-    H -->|Yes| I[Extract command output]
-    I --> J[Clear running state]
-    J --> K[Optional summarization]
-    K --> L[Return tool result to model]
-
-    H -->|No| M[Spawn Tokio supervisor]
-    M --> N[Return background-status tool message]
-    N --> O[Model continues reasoning]
-
-    M --> P[Continue polling tmux]
-    P --> Q{End marker found?}
-
-    Q -->|No| P
-    Q -->|Yes| R[Extract completed output]
-
-    R --> S[Create SessionEvent]
-    S --> T[Push event to pending queue]
-
-    T --> U[Next safe model-loop boundary]
-    U --> V[Drain pending event]
-    V --> W[Optional summarization]
-    W --> X[Inject completed tool result]
-    X --> O
-```
-
-## Background Session Supervision
-
-Session commands receive a short foreground execution window.
-
-Commands that complete quickly behave normally and return their output immediately.
-
-If a command remains active beyond that window, Adapt hands monitoring of the tmux session to a background Tokio task and immediately returns a tool-status message to the model.
-
-The model can then continue reasoning or perform other work while the original command continues running.
-
-The supervisor retains the command's unique marker information and continues polling the tmux pane independently.
-
-When the end marker appears, Adapt:
-
-```text
-detects completion
-        ↓
-extracts only the output between that command's markers
-        ↓
-creates a SessionEvent
-        ↓
-stores the raw result in the session's pending queue
-        ↓
-waits for the next safe model-loop boundary
-        ↓
-drains the event
-        ↓
-runs the normal output-processing path
-        ↓
-returns the completed result to the model
-```
-
-The queue is intentionally a boundary between asynchronous execution and model-context mutation.
-
-The background supervisor does **not** directly modify the model conversation while another part of the runtime may be using it.
-
-Instead, it records what happened.
-
-The foreground agent loop decides when it is safe to introduce that information into context.
-
-## Same-session execution protection
-
-A named session with an active background command will not accept another command until the running operation completes.
-
-If the model attempts to use that same session again, Adapt returns a tool message indicating that work is already active.
-
-This prevents a second command from overwriting the session's running-state marker or interfering with the output boundaries of the first operation.
-
-Parallel work is still possible by using another uniquely named session.
-
-Conceptually:
-
-```text
-network_scan
-    └── command running
-
-model requests another network_scan command
-    ↓
-Adapt detects active running marker
-    ↓
-tool: session already has background work running
-```
-
-while:
-
-```text
-network_scan ── running
-research     ── separate session
-python       ── separate session
-```
-
-can remain independent.
-
-## Session persistence
-
-Adapt intentionally does **not** automatically kill all tmux sessions when the interactive Adapt process exits.
-
-This allows terminal state to survive an Adapt restart.
-
-Inactive sessions are handled separately by the session cleanup task.
-
-This makes it possible to recover persistent work instead of tying the lifetime of every terminal to the lifetime of one chat process.
-
----
-
-# Python Virtual Environment Support
-
-The restricted-user setup creates a persistent Python virtual environment at:
-
-```text
-/home/model-user/.venv
-```
-
-When Adapt creates a new tmux session, it checks for an Adapt-managed virtual environment under that user's home directory.
-
-If one exists, Adapt automatically exposes:
-
-```text
-VIRTUAL_ENV
-```
-
-and prepends:
-
-```text
-.venv/bin
-```
-
-to the session `PATH`.
-
-The model therefore does not need to manually activate the environment.
-
-Commands such as:
-
-```bash
-python
-pip
-```
-
-resolve to the restricted user's persistent virtual environment automatically.
-
----
-
-# Execution Modes: Normal, Restricted, and Lockdown
-
-Have tested the installers with Ubuntu, Kubuntu, Kali and tested the installers and launch scripts with xfce, kde, and gnome terminals.
-
-Adapt can now be launched in three security modes. The mode changes the operating-system authority available to the Adapt process; it does not change the tool protocol used by the model.
-
-## Normal Mode
-
-```bash
-./run.sh
-```
-
-Adapt runs as the currently signed-in user and therefore inherits that user's normal filesystem, executable, network, and sudo access.
-
-This provides the least isolation and the greatest compatibility with the host environment.
-
-## Restricted Mode
-
-First configure the dedicated model account:
-
-```bash
-sudo ./setup_restricted_model_user.sh
-```
-
-Then launch:
-
-```bash
-./run.sh --restricted
-```
-
-Adapt runs as a dedicated Linux user (`model-user`) rather than as the signed-in desktop user.
-
-The setup creates a self-contained runtime under:
-
-```text
-/home/model-user/
-├── Adapt_v5
-├── config.toml
-├── main_system.txt
-├── summarizer.txt
-├── echo_tools.db
-├── echo_chat.jsonl
-├── .venv/
-└── workspace/
-```
-
-Runtime files that need to remain protected, such as configuration and prompt files, can remain administrator-controlled, while the model account is given write access only where runtime behavior requires it. The SQLite database remains writable so Adapt can record tool activity, and the workspace remains writable for model-created files.
-
-The dedicated Python virtual environment is persistent at:
-
-```text
-/home/model-user/.venv
-```
-
-Adapt-managed tmux sessions automatically expose that environment through `VIRTUAL_ENV` and `PATH`; the model does not need to manually activate it.
-
-Do **not** use:
-
-```bash
-su - model-user
-```
-
-The model user's password login is intentionally locked. `run.sh --restricted` performs the user transition for you.
-
-Restricted mode is based on ordinary Linux user/group ownership and permissions. It is a useful security boundary, but it is **not a complete filesystem sandbox**. Locations that Linux permits `model-user` to access remain accessible.
-
-## Lockdown Mode
-
-Lockdown adds a Bubblewrap sandbox around the dedicated restricted user.
-
-First configure the restricted account as above, then configure the lockdown prerequisites:
-
-```bash
-sudo ./setup_lockdown.sh
-```
-
-The lockdown setup checks the host environment, verifies Bubblewrap and the required Linux user-namespace/AppArmor behavior, and performs a Bubblewrap self-test. The setup is intended to avoid silently claiming lockdown is available when the host cannot actually create the sandbox.
-
-Launch with:
-
-```bash
-./run.sh --lockdown
-```
-
-Conceptually:
-
-```text
-signed-in user
-      ↓
-run.sh --lockdown
-      ↓
-dedicated model-user
-      ↓
-Bubblewrap namespace / filesystem boundary
-      ↓
-Adapt
-      ↓
-model tools
-```
-
-Lockdown keeps the dedicated-user boundary and adds namespace/filesystem isolation around the runtime. Required Adapt files and writable runtime locations are deliberately exposed to the sandbox rather than recreating the repository inside a complicated nested directory structure.
-
-Network access is retained because Adapt may require it for model endpoints, web tools, package access, APIs, or other configured functionality.
-
-### Why Lockdown May Ask for Your Password Twice
-
-When launching:
-
-```bash
-./run.sh --lockdown
-```
-
-you may receive two sudo authentication prompts. This is expected.
-
-The prompts authorize two separate privileged transitions involved in the lockdown launch:
-
-1. the transition from the signed-in account to the dedicated `model-user`;
-2. the launch/setup of the Bubblewrap-isolated runtime.
-
-Your sudo password is handled by `sudo` in the terminal. It is **not** passed through the model, stored in model context, or written into Adapt's tool messages.
-
-Depending on your system's sudo credential cache, one or both prompts may sometimes be satisfied by a recent authentication and therefore may not appear.
-
-### Terminal Launching
-
-Restricted and lockdown launches may need a fresh terminal so the interactive Adapt process owns the correct foreground terminal after the user/security transition.
-
-`run.sh` therefore detects supported terminal emulators rather than assuming one desktop environment. Current fallbacks include Konsole, GNOME Terminal, Kitty, Alacritty, XFCE Terminal, and xterm.
-
-### Choosing a Mode
-
-```text
-./run.sh
-    Current user permissions
-    Highest host access / least isolation
-
-./run.sh --restricted
-    Dedicated model-user
-    Linux user/group permission boundary
-
-./run.sh --lockdown
-    Dedicated model-user + Bubblewrap
-    Stronger optional filesystem/process isolation
-```
-
-No mode makes model-controlled execution risk-free. The appropriate mode depends on the tools, files, network resources, and host authority you intend to expose.
-
-
----
-
-# Sudo Behavior
-
-Adapt does not collect, store, or pipe your sudo password through the model.
-
-In normal mode, sudo authentication is handled by the user's terminal.
-
-In restricted mode, administrator-approved commands may be configured through Linux `sudoers`.
-
-The restricted-user setup currently demonstrates an allowlist-style configuration.
-
-Be careful when expanding it.
-
-For example, allowing a model to run package installation commands as root is **powerful** because packages may execute privileged installation scripts.
-
-Adapt does not pretend otherwise.
-
----
-
-## Terminal Hotkeys
-
-ADAPT includes a few built-in terminal shortcuts:
-
-- `Ctrl+Alt+N` — Open a new ADAPT process/tab
-- `Ctrl+C` — Exit the current ADAPT chat
-- `Enter` — Submit the current message
-- `Backspace` — Delete input
-
-# Defense in Depth
-
-Adapt's security model is intentionally layered.
-
-```mermaid
-flowchart TD
-    A[Model Output] --> B[Tool Parser]
-    B --> C[Adapt Safety Checks]
-    C --> D[Command Deny List / Obfuscation Checks]
-    D --> E[Linux User Permissions]
-    E --> F{Lockdown enabled?}
-    F -->|Yes| G[Bubblewrap Isolation]
-    F -->|No| H[sudo Allowlist if configured]
-    G --> H
-    H --> I[Operating System]
-
-    I --> J[Tool Output]
-    J --> K[Optional Summarizer]
-    K --> L[Main Model]
-```
-
-No single layer should be treated as perfect protection.
-
-The current layers include:
-
-* model instructions,
-* explicit tool syntax,
-* Rust-side command safety checks,
-* configurable deny rules,
-* obfuscation checks,
-* dedicated Linux user permissions,
-* optional Bubblewrap lockdown isolation,
-* optional sudo allowlisting,
-* workspace separation,
-* optional tool-output summarization.
-
-The operating system is the final authority over what a process is actually allowed to do.
-
-For cloud-provider operation, there is an additional trust boundary:
-
-```text
-local operating system
-        ↓
-Adapt tools
-        ↓
-tool output / conversation context
-        ↓
-remote model provider
-```
-
-Use that configuration only when the information crossing that boundary is acceptable to you.
-
----
-
-# Tool Output Summarization
-
-CLI tools can produce enormous amounts of noisy output.
-
-Adapt can optionally send tool output through a smaller summarizer model before returning it to the main model.
-
-```mermaid
-flowchart LR
-    A[CLI / tmux output] --> B[Small Summarizer Model]
-    B --> C[High-Signal Result]
-    C --> D[Main Agent Model]
-```
-
-This is especially useful for:
-
-* verbose command output,
-* scanners,
-* logs,
-* package managers,
-* debugging output,
-* long terminal sessions,
-* completed background-session output.
-
-Summarization is **optional**.
-
-If:
-
-```toml
-[summarizer]
-enabled = false
-```
-
-the original output is returned directly to the model.
-
-If the summarizer is enabled but fails, Adapt displays a warning to the human and falls back to the original tool output so the workflow can continue.
-
-```text
-summarizer succeeds
-        ↓
-model receives summarized output
-
-summarizer fails
-        ↓
-human receives visible warning
-        ↓
-model receives original output
-        ↓
-workflow continues
-```
-
-Background-session completion events enter this same processing path after being drained from the pending queue.
-
-The supervisor itself stores the raw result rather than performing summarization.
-
-This keeps asynchronous process supervision separate from model-output processing.
-
-The summarizer can also act as another useful trust-filtering layer between untrusted external output and the main model, but it should **not** be treated as a complete prompt-injection defense by itself.
-
----
-
-# Memory
-
-Adapt includes persistent cross-thread semantic memory.
-
-The memory system stores information in a human-readable Markdown file and uses embeddings to retrieve relevant entries.
-
-Available memory tools include:
-
-```text
-append_memory(category, content)
-read_memory(query, limit)
-```
-
-Instead of dumping the entire memory history into every prompt, Adapt retrieves relevant information based on the current task.
-
-```mermaid
-flowchart LR
-    A[Current Task] --> B[Embedding Search]
-    C[memory.md] --> B
-    B --> D[Relevant Memories]
-    D --> E[Model Context]
-```
-
-The memory file location is configured in `config.toml`.
-
----
-
-# Built-In JSON Tools
-
-The current framework includes structured tools for:
-
-* `get_current_datetime`
-* `web_search`
-* `browse_page`
-* `append_memory`
-* `read_memory`
-
-JSON tools can be enabled or disabled through configuration.
-
-The included web search implementation uses Tavily.
-
-You will need your own Tavily API key if you enable that tool.
-
-Adapt is designed so additional JSON tools can be added for your own environment.
-
----
-
-# Logging
-
-Adapt currently maintains two different forms of useful execution history.
-
-## SQLite Tool Logging
-
-Tool activity and summaries can be recorded in SQLite for runtime inspection and state tracking.
-
-## JSONL Conversation Logging
-
-Adapt also writes a sequential JSONL transcript.
-
-The logging path preserves the distinction between:
-
-```text
-user
-assistant
-tool
-assistant
-tool
-assistant
-```
-
-Raw assistant responses are persisted before executable tool tags are stripped from the **live** model context.
-
-The framework first detects and parses the model-generated tool request. Only after the request has been captured for execution are the executable opening/closing tags removed from the assistant content that is retained in live context. The tool's command or argument content is preserved; only the executable tag flags are removed.
-
-That separation is intentional.
-
-```mermaid
-flowchart TD
-    A[Raw Model Response] --> B[Persistent JSONL Transcript]
-    A --> C[Runtime Parser]
-    C --> D[Strip Executable Tool Tag]
-    D --> E[Live Model Context]
-    C --> F[Execute Tool]
-    F --> G[Tool Result]
-    G --> B
-    G --> E
-```
-
-This means the persistent transcript can retain information such as:
-
-```xml
-<command>ls -lah</command>
-```
-
-while the live conversation does not retain an old executable tag that could later be rediscovered and accidentally executed again.
-
-The JSONL transcript is useful for:
-
-* debugging,
-* evaluating agent behavior,
-* inspecting failure recovery,
-* generating or reviewing training data.
-
-**Be aware that logs may contain sensitive command output or user information.**
-
----
-
-# Model and Chat-Template Compatibility
-
-Adapt deliberately does not force a single model chat template.
-
-One design choice in my own model stack is support for:
+My own model stack uses the semantic distinction:
 
 ```text
 system
@@ -1403,121 +619,296 @@ assistant
 tool
 ```
 
-as semantically distinct roles.
+rather than presenting tool output as another human message.
 
-A common simple-agent pattern returns command output as another `user` message:
-
-```text
-assistant:
-    run command
-
-user:
-    command output
-```
-
-I prefer:
-
-```text
-assistant:
-    run command
-
-tool:
-    command output
-```
-
-because the human did not produce the tool result.
-
-Adapt therefore exposes the tool role through configuration:
+Adapt therefore exposes the tool-result role through configuration:
 
 ```toml
 [messages]
 tool_role_name = "tool"
 ```
 
-Some models and templates accept additional roles cleanly.
+Some models and chat templates support additional roles cleanly.
 
 Others are strict.
 
-If your model's template only allows `user` and `assistant`, you may need to configure a compatible role or modify the template.
+If a model only accepts `user` and `assistant`, the configured Adapt role or the model template may need to be adjusted.
 
-Adapt cannot force an incompatible model/template to accept a role its parser explicitly rejects.
-
-The same rule applies to asynchronous execution state:
-
-```text
-assistant:
-    start long-running session command
-
-tool:
-    session is continuing in background
-
-assistant:
-    continue reasoning
-
-tool:
-    background session completed
-```
-
-Your selected model, provider, and chat template must be compatible with the message grammar you configure Adapt to send.
+Adapt cannot force an incompatible template to accept a role its parser rejects.
 
 ---
 
-# Operating System Support
+# Memory
 
-## Linux
+Adapt includes persistent semantic memory.
 
-Linux is the primary platform.
+Memory entries are stored in a human-readable Markdown file and retrieved through embeddings.
 
-Adapt depends on Unix/Linux concepts including:
-
-* Bash / `sh`
-* tmux
-* Unix process behavior
-* Linux users and groups
-* filesystem permissions
-* sudo
-* command-line utilities
-
-## Windows 11
-
-Adapt can run on Windows through:
+Available memory operations include:
 
 ```text
-Windows 11
-    ↓
-WSL2
-    ↓
-Linux environment
-    ↓
-Adapt
+append_memory(category, content)
+read_memory(query, limit)
 ```
 
-I have used Adapt in this configuration.
+Rather than injecting the entire memory file into every prompt, Adapt embeds the current query and retrieves relevant entries.
 
-### Native Windows
+The embedding backend is configurable and can use a dedicated embedding endpoint or a compatible model path depending on the deployment.
 
-Native Windows execution is **not supported**.
+---
 
-The runtime architecture relies too heavily on Linux and Unix primitives for native Windows support to currently make sense.
+# Context Management
 
-## macOS
+Adapt can compress long conversation histories once a configured threshold is reached.
 
-The restricted-user setup is designed around Linux administration and should not be assumed to work on macOS.
+The summarization request is a separate inference request.
 
-Other portions of Adapt may work with modification, but macOS is not currently a tested target.
+The resulting context keeps:
+
+- the original system prompt,
+- a compressed conversation summary,
+- recent turns.
+
+The threshold should leave enough room below the actual model context limit for the summarization request itself.
+
+Adapt does not attempt to protect the user from every invalid context configuration.
+
+---
+
+# Tool-output Summarization
+
+CLI applications can generate large amounts of noisy output.
+
+Adapt can optionally send oversized tool results through a smaller summarizer model before returning them to the main model.
+
+Typical uses include:
+
+- scanners
+- logs
+- package-manager output
+- debugging output
+- verbose commands
+- long terminal-session output
+
+If output remains below the configured raw-output threshold, it is returned directly.
+
+If summarization is disabled, oversized output is also returned directly.
+
+If the summarizer is enabled but fails, Adapt warns the human and falls back to the original output rather than stopping the workflow.
+
+The asynchronous supervisor stores raw results.
+
+Summarization happens only after the result crosses back into the normal model-output processing path.
+
+---
+
+# Logging
+
+Adapt maintains two primary forms of execution history.
+
+## SQLite tool log
+
+Tool activity and compact output summaries can be stored in SQLite for runtime inspection and recovery-related state.
+
+## JSONL conversation log
+
+Adapt also stores a sequential transcript preserving role distinctions such as:
+
+```text
+user
+assistant
+tool
+assistant
+tool
+assistant
+```
+
+This is useful for:
+
+- debugging
+- evaluating agent behavior
+- reviewing failure recovery
+- examining tool-use trajectories
+- building or reviewing training data
+
+Logs may contain sensitive user or machine information.
+
+---
+
+# Security Model
+
+Adapt's security approach is intentionally layered.
+
+Current layers include:
+
+- model instructions
+- explicit tool syntax
+- Rust-side command safety checks
+- configurable deny rules
+- obfuscation checks
+- Linux filesystem and process permissions
+- optional dedicated model user
+- optional Bubblewrap isolation
+- configurable sudo access
+- capability enforcement on the remote tool server
+
+No single layer should be treated as perfect protection.
+
+The operating system remains the final authority over what the Adapt process can actually do.
+
+---
+
+# Execution Modes
+
+## Normal mode
+
+```bash
+./run.sh
+```
+
+Adapt runs with the permissions of the currently signed-in user.
+
+This provides the greatest host compatibility and the least isolation.
+
+## Restricted mode
+
+Configure the dedicated user:
+
+```bash
+sudo ./setup_restricted_model_user.sh
+```
+
+Run:
+
+```bash
+./run.sh --restricted
+```
+
+Adapt then executes under the dedicated `model-user` account.
+
+The restricted environment includes its own runtime files, workspace, database, and persistent Python virtual environment.
+
+The model user's password login is intentionally locked.
+
+Do not manually use:
+
+```bash
+su - model-user
+```
+
+Use the provided launcher.
+
+## Lockdown mode
+
+Configure prerequisites:
+
+```bash
+sudo ./setup_lockdown.sh
+```
+
+Run:
+
+```bash
+./run.sh --lockdown
+```
+
+Lockdown combines the restricted Linux user with Bubblewrap namespace/filesystem isolation.
+
+Required runtime files and writable locations are deliberately exposed to the sandbox.
+
+Networking remains available because Adapt may require access to configured model endpoints, remote tools, package repositories, or other external services.
+
+No execution mode makes model-controlled tools risk-free.
+
+Choose a boundary appropriate for the data and authority exposed to the runtime.
+
+---
+
+# Sudo Behavior
+
+Adapt does not collect or store the user's sudo password.
+
+In normal mode, authentication is handled by the terminal and `sudo`.
+
+Restricted deployments may configure specific administrator-approved sudo commands through Linux `sudoers`.
+
+Be careful when expanding those permissions.
+
+Allowing package installation as root, for example, can indirectly allow privileged installation scripts to execute.
+
+---
+
+# Cloud Model Warning
+
+Adapt can expose command output, files, logs, memory, paths, network information, and other machine state to the selected model.
+
+When a **cloud model provider** is used, information sent back to the model may leave the local machine.
+
+If the workflow contains information that must remain local, confidential, proprietary, regulated, or otherwise private, use a local model and local supporting services.
+
+Adapt defaults toward local operation.
+
+Cloud-provider support should not be interpreted as a recommendation to give a remote model unrestricted access to a host.
+
+---
+
+# Workspace
+
+A typical workspace can use:
+
+```text
+workspace/
+├── temp/
+├── human_review/
+└── scripts/
+```
+
+Suggested use:
+
+- `workspace/temp/` — scratch files and intermediate artifacts
+- `workspace/human_review/` — finished user-facing output
+- `workspace/scripts/` — reusable generated scripts
+
+`<cleanup/>` removes temporary workspace contents when requested by the model.
+
+---
+
+# Configuration
+
+`config.toml` controls most runtime behavior.
+
+Configurable areas include:
+
+- model provider
+- endpoint
+- model name
+- API key
+- prompts
+- external context file
+- tool-output summarizer
+- tool tags
+- enabled JSON tools
+- message-role names
+- memory paths
+- tool server
+- context thresholds
+- safety rules
+- command deny lists
+
+One goal of Adapt v5 is to keep deploy-time differences in configuration instead of requiring Rust changes wherever possible.
 
 ---
 
 # Quick Start
 
-## 1. Clone the Repository
+## 1. Clone
 
 ```bash
 git clone https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5
 cd Echo_Adapt_v5
 ```
 
-## 2. Make the Scripts Executable
+## 2. Make scripts executable
 
 ```bash
 chmod +x build.sh
@@ -1527,26 +918,22 @@ chmod +x setup_restricted_model_user.sh
 chmod +x setup_lockdown.sh
 ```
 
-## 3. Install Dependencies
+## 3. Install dependencies
 
 ```bash
 ./install_deps.sh
 ```
 
-The installer currently detects common package-manager families including:
+The installer includes support for several common Linux package-manager families including:
 
-* `apt-get`
-* `dnf`
-* `pacman`
-* `zypper`
+- `apt-get`
+- `dnf`
+- `pacman`
+- `zypper`
 
-It installs the basic dependencies required by Adapt, including Rust tooling dependencies, tmux, curl, and Python/venv support where required.
+Not every distribution has been personally tested.
 
-Again: **these environments have not all been tested by me personally.**
-
-If one breaks on your distribution, please report it.
-
-## 4. Configure Your Model Endpoint
+## 4. Configure the runtime
 
 Edit:
 
@@ -1554,7 +941,9 @@ Edit:
 config.toml
 ```
 
-For normal local operation:
+At minimum, configure your model endpoint.
+
+Example:
 
 ```toml
 [endpoint]
@@ -1566,34 +955,6 @@ temperature = 0.7
 max_tokens = 2048
 ```
 
-For a remote OpenAI-compatible provider:
-
-```toml
-[endpoint]
-provider = "openai_compatible"
-url = "YOUR_PROVIDER_ENDPOINT"
-model = "YOUR_MODEL_NAME"
-api_key = "YOUR_API_KEY"
-temperature = 0.7
-max_tokens = 2048
-```
-
-For Grok:
-
-```toml
-[endpoint]
-provider = "grok"
-url = "YOUR_XAI_RESPONSES_ENDPOINT"
-model = "YOUR_GROK_MODEL"
-api_key = "YOUR_API_KEY"
-temperature = 0.7
-max_tokens = 2048
-```
-
-Provider endpoints and model identifiers change over time.
-
-Check your provider's current documentation rather than assuming an example in this README will remain valid forever.
-
 The included prompt files are:
 
 ```text
@@ -1601,25 +962,23 @@ main_system.txt
 summarizer.txt
 ```
 
-The included prompts should be treated as **examples and starting points**, not mandatory prompts.
+They are examples and starting points rather than mandatory prompts.
 
-## 5. Start Your Model Server
+## 5. Start the model server
 
-For example, if using llama.cpp, run an OpenAI-compatible server for your main model.
+Run whatever compatible inference server you intend to use.
 
-If using tool-output summarization, run the summarizer endpoint configured in `config.toml`.
+If tool-output summarization is enabled, also start the configured summarizer endpoint.
 
-Your ports do **not** have to match mine.
+Ports are configurable.
 
-Adapt reads them from configuration.
-
-## 6. Build Adapt
+## 6. Build
 
 ```bash
 ./build.sh
 ```
 
-The build script performs a locked Cargo release build:
+The build script performs a locked release build:
 
 ```bash
 cargo build --release --locked
@@ -1631,239 +990,106 @@ The resulting executable is:
 target/release/Adapt_v5
 ```
 
-## 7. Run Adapt
+## 7. Run
 
-### Current User
+Normal:
 
 ```bash
 ./run.sh
 ```
 
-### Restricted Model User
-
-First configure the restricted account:
+Restricted:
 
 ```bash
 sudo ./setup_restricted_model_user.sh
-```
-
-Then launch:
-
-```bash
 ./run.sh --restricted
 ```
 
-### Lockdown
-
-After configuring the restricted account, configure the Bubblewrap lockdown prerequisites:
+Lockdown:
 
 ```bash
 sudo ./setup_lockdown.sh
-```
-
-Then launch:
-
-```bash
 ./run.sh --lockdown
 ```
 
-Lockdown may request sudo authentication twice because the user transition and isolated launch are separate privileged operations.
-
-Do **not** use:
-
-```bash
-su - model-user
-```
-
-The restricted user's password login is intentionally locked by the setup script.
-
-Use `run.sh --restricted` or `run.sh --lockdown` so the launcher performs the required transition and terminal handling.
-
 ---
 
-# Example Workspace Layout
+# Terminal Controls
 
-Adapt workflows can use a structure such as:
+| Shortcut | Action |
+|---|---|
+| `Ctrl+C` | Exit current Adapt chat |
+| `Ctrl+\` | Interrupt active model generation |
+| `Ctrl+Alt+N` | Start another Adapt process/tab |
+| `Enter` | Submit current input |
+| `Backspace` | Delete input |
 
-```text
-workspace/
-├── temp/
-├── human_review/
-└── scripts/
-```
-
-A useful convention is:
-
-* `workspace/temp/` — scratch work and intermediate artifacts
-* `workspace/human_review/` — finished artifacts intended for the user
-* `workspace/scripts/` — reusable scripts generated during work
-
-The cleanup tool removes the contents of:
-
-```text
-workspace/temp/
-```
-
-after the task when requested by the model.
-
----
-
-# Configuration
-
-`config.toml` controls the runtime.
-
-Current configurable areas include:
-
-* provider protocol
-* model endpoint
-* model name
-* optional API key
-* system prompt path
-* optional external context path
-* summarizer prompt path
-* summarizer enable/disable behavior
-* tool tags
-* JSON tools
-* memory paths
-* message role names
-* context-summarization threshold
-* safety rules
-* command deny lists
-
-One of the goals of v5 has been moving behavior out of hardcoded Rust values and into configuration where that makes sense.
-
----
-
-# Configurable Tool Tags
-
-The tool parser is config-driven.
-
-The included defaults use tags such as:
-
-```xml
-<command>...</command>
-
-<session name="...">...</session>
-
-<end_session name="..."/>
-
-<json>...</json>
-
-<cleanup/>
-```
-
-The exact protocol can be changed through configuration without redesigning the runtime.
-
-This is useful if a model was trained on a different tool vocabulary.
-
-The model does not need to be trained specifically on Adapt's default strings as long as the runtime and model agree on the configured protocol.
-
----
-
-# Hotkeys
-
-Adapt currently includes keyboard controls for interactive operation.
-
-| Shortcut                                        | Action                             |
-| :---------------------------------------------- | :--------------------------------- |
-| <kbd>Ctrl</kbd> + <kbd>C</kbd>                  | Exit the current chat              |
-| <kbd>Ctrl</kbd> + <kbd>\</kbd>                  | Interrupt active token generation  |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>N</kbd> | Start a new Adapt instance/process |
-
-The terminal-launch logic checks several common Linux terminal emulators rather than assuming a single desktop environment.
-
-Current fallbacks include:
-
-```text
-Konsole
-GNOME Terminal
-Kitty
-Alacritty
-XFCE Terminal
-xterm
-```
-
-Terminal behavior is another area where feedback from different Linux desktops is useful.
+The launcher supports several common Linux terminal emulators, including Konsole, GNOME Terminal, Kitty, Alacritty, XFCE Terminal, and xterm.
 
 ---
 
 # Multiple Adapt Processes
 
-A new Adapt process has its own:
+Separate Adapt processes maintain independent:
 
-* model context,
-* process ID,
-* active-session map,
-* namespaced tmux sessions.
+- model context
+- process IDs
+- active-session maps
+- internally namespaced tmux sessions
 
-This makes it possible to run multiple independent Adapt conversations while sharing the same broader workspace when desired.
-
-Session names are internally namespaced so something like:
-
-```text
-python
-```
-
-does not simply become one global tmux session called `python`.
+This allows multiple independent conversations to use the same broader machine or workspace without sharing one global session namespace.
 
 ---
 
-# Current Status
+# Operating System Support
 
-Adapt v5.1 currently includes:
+## Linux
 
-* Rust-based runtime
-* config-driven provider abstraction
-* default local OpenAI-compatible model path
-* generic remote OpenAI-compatible model path
-* experimental Grok Responses API path
-* optional Bearer API authentication
-* provider-aware main context summarization
-* configurable model/tool message role
-* raw command execution
-* persistent named tmux sessions
-* marker-based tmux output capture
-* session reuse
-* asynchronous supervision of long-running tmux commands
-* foreground-to-background session handoff
-* queued background-session completion events
-* safe model-loop reinjection of completed session results
-* same-session running-command protection
-* inactive-session cleanup
-* config-driven tool tags
-* JSON function tools
-* web search
-* page browsing
-* semantic cross-thread memory
-* Markdown-backed memory
-* embedding-based memory retrieval
-* workspace cleanup tool
-* optional tool-output summarization
-* graceful fallback when summarization fails
-* optional external context file
-* SQLite tool logging
-* JSONL conversation/tool transcript logging
-* configurable safety deny rules
-* obfuscation checks
-* Linux-permission-based restricted-user mode
-* optional Bubblewrap lockdown mode
-* lockdown prerequisite/self-test setup
-* terminal-emulator detection for isolated launches
-* controlled sudo configuration
-* persistent Python virtual environment for the restricted user
-* terminal hotkey support
-* multiple concurrent Adapt processes
-* Linux support
-* Windows 11 operation through WSL2
-* Optional rust [Adapt_server](https://github.com/charlesericwilson-portfolio/Echo_Adapt_v5/tree/main/adapt_server) build as well as an included simple chat interface at http://127.0.0.1:8080/
+Linux is the primary target.
+
+Adapt relies heavily on Unix/Linux behavior including:
+
+- `sh`
+- tmux
+- process execution
+- users and groups
+- filesystem permissions
+- sudo
+- common CLI utilities
+
+## Windows 11
+
+Adapt can run through:
+
+```text
+Windows 11
+    ↓
+WSL2
+    ↓
+Linux
+    ↓
+Adapt
+```
+
+I have used Adapt in this configuration.
+
+## Native Windows
+
+Not supported.
+
+The runtime architecture relies heavily enough on Linux/Unix primitives that a native Windows port is not currently a design goal.
+
+## macOS
+
+The Linux-specific restricted-user and isolation setup should not be assumed to work on macOS.
+
+Other parts of the runtime may work with modification, but macOS is not currently a tested platform.
 
 ---
 
 # What Is Actually Tested
 
-I want to be explicit about this.
-
-I personally test Adapt primarily with:
+I primarily test Adapt with:
 
 ```text
 Linux
@@ -1872,352 +1098,29 @@ local model server
 +
 my own local model stack
 +
-my own hardware/environment
+my own hardware
 ```
 
-I have also used Adapt under Windows 11 through WSL2.
+I have also used Adapt through WSL2 on Windows 11.
 
-The local provider path has been tested through normal chat and Adapt tool execution after the v5.1 provider refactor.
+The local provider path is the primary regression-tested configuration.
 
-The provider abstraction compiles and the local path has been regression-tested after integration.
+That does **not** mean every combination of:
 
-That does **not** mean:
+- Linux distribution
+- model
+- model server
+- GPU stack
+- cloud provider
+- chat template
+- tool-message role
+- terminal emulator
 
-* every OpenAI-compatible cloud API has been tested,
-* every provider accepts every configured message role,
-* every Linux distribution works,
-* every local model template supports the Adapt protocol,
-* every backend interprets tool messages identically,
-* or Grok's current live API has been revalidated against every v5.1 path.
+has been validated.
 
-If something fails, report it.
+It has not.
 
-There are bugs in this project.
-
-I simply may not have found yours yet.
-
----
-
-# Project History
-
-Adapt v5 is the result of several iterations of the Echo project.
-
-Earlier versions experimented with Python proxies, separate tool services, tmux wrappers, summarization components, and different ways of connecting models to operating-system tools.
-
-v5 moved the primary runtime into Rust and removed a significant amount of unnecessary abstraction.
-
-The older repositories are intentionally still available because they show how the architecture evolved.
-
-Start here:
-
-[Echo Project Overview](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview)
-
-The previous Rust/tool-system iterations contain many of the ideas that eventually became Adapt v5.
-
-The older Grok branch should now be considered a historical provider proof of concept rather than the desired long-term architecture.
-
-Provider-specific behavior is moving into the main runtime instead of maintaining separate forks for each model service.
-
----
-
-# Why Echo Is Fine-Tuned for Adapt
-
-Fine-tuning is **not required** to use Adapt.
-
-The included system prompt can teach a capable model how to use the protocol.
-
-However, one of my broader research/development goals is to train models so that the Adapt framework behaves like a protocol the model already knows.
-
-Instead of requiring a huge prompt explaining:
-
-```text
-this tag means command
-this tag means session
-this JSON means web search
-put intermediate work here
-recover from tool errors this way
-```
-
-the model can learn those behaviors directly from training examples.
-
-Echo is my experimental model for that approach.
-
-The training project contains multi-step workflows involving:
-
-* shell commands,
-* persistent sessions,
-* research,
-* web tools,
-* memory,
-* debugging,
-* file creation,
-* error recovery,
-* document workflows,
-* and autonomous multi-tool task completion.
-
-The current Echo Instroder model can follow the Adapt protocol with little or no protocol explanation compared with an untrained base model.
-
----
-
-# Recent Autonomous Workflow Example
-
-The following is a recent simple research workflow.
-
-I asked Echo for the top ten dog names, intentionally did **not** provide the correct working directory, and requested the final artifact in Markdown format.
-
-The workflow demonstrates the model recovering the required workspace state and continuing through a multi-step task rather than requiring the entire execution path to be specified in advance.
-
-### Autonomous Workflow
-
-![Echo Adapt autonomous workflow](screenshots/Research-1.png)
-
-![Echo Adapt persistent terminal session](screenshots/Research-2.png)
-
-[Artifact](dog_names.md)
-
-
-# What Adapt Is Not
-
-Adapt is **not**:
-
-* a perfect security sandbox,
-* a replacement for Linux permissions or host security policy,
-* a guarantee that a model will behave correctly,
-* tied to one particular model,
-* tied to llama.cpp,
-* dependent on LangChain,
-* a native Windows runtime,
-* a guarantee that every "OpenAI-compatible" provider behaves identically,
-* a guarantee that remote-provider data remains on your machine,
-* finished software.
-
-It is an actively developed runtime for experimenting with models that can operate real tools over longer workflows.
-
-Use appropriate permissions and do not give a model access to anything you are unwilling for that process to touch.
-
----
-
-# Roadmap
-
-Most larger architectural changes remain planned for Adapt v6 rather than turning v5 into an entirely different runtime.
-
-There are, however, several smaller v5.x experiments that can extend the current architecture without replacing it.
-
-## Near-Term v5.x Work
-
-### Multimodal model input
-
-One of the next experiments is allowing Adapt to pass images to a multimodal model.
-
-This is **not currently implemented**.
-
-The initial goal is image understanding, not image generation.
-
-A possible first implementation is deliberately simple:
-
-```text
-user gives local image path
-        ↓
-model requests view_image
-        ↓
-Adapt loads image
-        ↓
-image returned as multimodal tool observation
-        ↓
-model reasons over image
-        ↓
-normal Adapt tool loop continues
-```
-
-For an image directly supplied by a user, the image belongs to the user message.
-
-For an image produced by a tool or captured from the environment, the intended semantic model is:
-
-```text
-assistant
-    ↓ requests visual observation
-
-tool
-    ↓ image observation
-
-assistant
-    ↓ reasons over image
-```
-
-The goal is to preserve the existing principle:
-
-> **User messages should represent things produced by the user. Tool results should represent things produced by tools.**
-
-Potential early use cases include:
-
-* terminal screenshots,
-* GUI error dialogs,
-* screenshots of running applications,
-* diagrams,
-* tables,
-* document images,
-* visual verification of completed work,
-* and environment screenshots used during debugging.
-
-A simple `view_image` JSON tool could provide the first implementation without requiring the terminal itself to render the image.
-
-Later work may include direct screenshot capture and multimodal tool-result payloads.
-
-The initial multimodal implementation will likely be tested with a separate multimodal model rather than changing the current Echo Instroder lineage.
-
-### Provider compatibility reports
-
-The current provider abstraction intentionally covers protocols rather than maintaining a giant list of model brands.
-
-Future provider code should only be added when a service genuinely requires a different request/response protocol.
-
-### Lockdown hardening and portability
-
-Adapt now includes an optional Bubblewrap lockdown mode in addition to the dedicated restricted-user mode.
-
-Near-term work can continue hardening that boundary and testing it across additional Linux distributions, AppArmor/user-namespace configurations, terminal emulators, and host environments without making lockdown mandatory for normal Adapt operation.
-
-## Larger v6 Direction
-
-Ideas under development for Adapt v6 include:
-
-* task scheduling,
-* durable background agent tasks,
-* worker processes,
-* durable task queues,
-* saved and reloadable model context,
-* context compression and restoration,
-* integrated GUI,
-* embedded terminal/session views,
-* thread switching,
-* stronger task-state persistence,
-* human-review workflows,
-* shared execution services for background workers,
-* richer session recovery,
-* improved portability testing,
-* and a central interface for multiple Adapt components.
-
-Adapt v5 already supports **asynchronous supervision of individual persistent-session commands**.
-
-This should not be confused with the broader background-task architecture planned for v6.
-
-The current v5 supervisor allows an already-running terminal operation to continue without blocking the model.
-
-The planned v6 architecture is broader: entire model workers or tasks may eventually execute independently, survive across different runtime lifetimes, and interact with durable task queues and shared execution services.
-
-One architectural direction being explored is:
-
-```mermaid
-flowchart TD
-    A[Scheduler] --> B[Task Queue]
-    B --> C[Fresh Adapt Worker]
-    C --> D[Shared Tool Service]
-    D --> E[Commands / tmux / Workspace]
-    E --> D
-    D --> C
-    C --> F[Task State / Transcript / Output]
-    F --> A
-```
-
-The goal is for background model workers to eventually be disposable while execution state remains durable.
-
----
-
-# Building on Adapt
-
-One of the goals of Adapt is that you should be able to modify it for your own model and environment.
-
-You can:
-
-* change tool tags,
-* change the configured tool-message role,
-* replace the prompts,
-* add JSON functions,
-* modify the safety policy,
-* change model servers,
-* use a compatible local or remote model provider,
-* add CLI tools to the host,
-* adjust Linux permissions,
-* change the workspace structure,
-* train a model specifically for your version of the protocol.
-
-I would rather keep the runtime understandable than hide everything behind layers of abstractions.
-
-If you use this project for your own experiments, tear it apart.
-
-If something is stupid, tell me.
-
-If something breaks, definitely tell me.
-
-If you build something cool with it, I would like to hear about that too.
-
----
-
-# Created With Help From AI
-
-AI has been used extensively throughout the Echo project as an **interactive engineering tool** for architecture discussion, feature iteration, debugging, research, and implementation support.
-
-I use models much like I would use an always-available technical collaborator: to spitball designs, challenge assumptions, reason through edge cases, explain unfamiliar language features, trace compiler errors, and help translate an architectural idea into an implementation that I can inspect and test.
-
-Different models have been useful for different parts of the project:
-
-* **Grok** — architecture discussion and early refactoring work, including helping break the original monolithic `main.rs` into smaller Rust components and the original cloud-provider proof of concept.
-* **ChatGPT** — iterative feature integration, Rust debugging, compiler-error analysis, provider abstraction, architecture discussion, and edge-case troubleshooting.
-* **Gemini** — model fine-tuning guidance, LoRA training troubleshooting, dataset structuring, and architectural iteration around model state and memory.
-
-The development process is intentionally interactive rather than a one-shot code-generation workflow.
-
-A typical feature evolves more like:
-
-```text
-identify a limitation
-        ↓
-reason about desired behavior
-        ↓
-discuss possible architecture
-        ↓
-modify a small part of the implementation
-        ↓
-compile
-        ↓
-inspect compiler feedback
-        ↓
-test against the running model
-        ↓
-discover behavioral edge cases
-        ↓
-revise the architecture
-        ↓
-test again
-```
-
-The provider abstraction is a good example.
-
-The project originally contained a separate Grok proof-of-concept branch.
-
-As the main runtime continued evolving, maintaining an entire provider-specific branch stopped making sense.
-
-The current approach instead isolates the relatively small differences between provider request and response formats while leaving the rest of Adapt unchanged.
-
-Likewise, the background session supervisor began as a design problem: long-running persistent-session commands should not unnecessarily block the model's reasoning trajectory.
-
-The implementation was iterated through discussion, small Rust changes, compiler feedback, and live testing against Echo.
-
-Runtime testing then exposed additional behavioral requirements, including the need for an immediate background-status tool message and protection against issuing another command into an already-running named session.
-
-AI helped accelerate that design-and-debug loop, but the architectural decisions, integration choices, testing, and acceptance of changes remain part of the normal engineering process.
-
-I manually review, test, modify, and learn the code integrated into Adapt rather than treating generated output as something to paste blindly into the project.
-
-Part of the reason I maintain the full public chain of repositories across the Echo project is to document that evolutionary engineering process—showing how architectures mature, fail, get tested, and get refactored over time rather than pretending the final system appeared fully formed.
-
----
-
-# Contributing / Feedback
-
-Feedback is welcome.
-
-I am especially interested in reports from people running Adapt on hardware, providers, Linux environments, model servers, or chat templates different from mine.
+If something works differently on your environment, please open an issue.
 
 Useful reports include:
 
@@ -2227,8 +1130,8 @@ Distribution:
 WSL2 or native Linux:
 Terminal emulator:
 Model:
-Model server / cloud provider:
-Configured provider mode:
+Model server / provider:
+Configured provider:
 Configured tool role:
 GPU / accelerator:
 What you tried:
@@ -2237,25 +1140,235 @@ What failed:
 Error output:
 ```
 
-Open an issue with as much or as little information as you have.
+Even a short report such as:
 
-Again:
+> "Works on Fedora."
 
-> **If this does not work on your PC, I need you to tell me. Otherwise I only know it works on mine.**
+or:
+
+> "This template rejects role: tool."
+
+is useful.
+
+---
+
+# Why Echo Is Fine-Tuned for Adapt
+
+Fine-tuning is not required to use Adapt.
+
+The included prompt can teach a capable model the protocol.
+
+However, one goal of the Echo project is to train tool behavior deeply enough that the runtime protocol is already familiar to the model rather than requiring a large prompt explaining every tool decision.
+
+Echo training examples include multi-step workflows involving:
+
+- commands
+- persistent sessions
+- research
+- structured tools
+- web access
+- memory
+- debugging
+- file creation
+- error recovery
+- document workflows
+- autonomous multi-tool tasks
+
+The current Echo Instroder model can follow the Adapt protocol with considerably less explicit protocol explanation than an untrained base model.
+
+---
+
+# Autonomous Workflow Example
+
+A recent simple workflow asked Echo to research the top ten dog names, recover from an intentionally missing working-directory detail, and produce the final artifact as Markdown.
+
+Screenshots:
+
+![Echo Adapt autonomous workflow](screenshots/Research-1.png)
+
+![Echo Adapt persistent terminal session](screenshots/Research-2.png)
+
+[Example artifact](dog_names.md)
+
+---
+
+# Project History
+
+Adapt v5 is the latest Rust runtime in a longer sequence of Echo experiments.
+
+Earlier versions explored:
+
+- Python-based runtimes
+- separate tool processes
+- tmux wrappers
+- summarization services
+- different model/tool protocols
+- provider-specific experiments
+
+Earlier Python designs required multiple independent processes for runtime services.
+
+Adapt v5 moved the core runtime into Rust and consolidated much of that lifecycle and execution logic into a single application.
+
+Older repositories remain public because they document how the architecture evolved.
+
+See:
+
+[Echo Project Overview](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview)
+
+---
+
+# What Adapt Is Not
+
+Adapt is not:
+
+- a perfect security sandbox
+- a replacement for Linux permissions
+- a guarantee that a model behaves correctly
+- tied to one model
+- tied to llama.cpp
+- dependent on LangChain
+- a native Windows runtime
+- a guarantee that every OpenAI-compatible provider behaves identically
+- a guarantee that cloud-provider data remains local
+- finished software
+
+It is an actively developed runtime for experimenting with models that can operate real tools over longer workflows.
+
+Do not give a model access to anything you are unwilling for that process to touch.
+
+---
+
+# Roadmap
+
+Most major orchestration changes are intended for Adapt v6 rather than continuously expanding v5 into a different system.
+
+Near-term v5.x work includes:
+
+- multimodal image input
+- continued provider compatibility testing
+- MCP/tool-server interoperability
+- background execution refinement
+- Linux portability testing
+- restricted/lockdown hardening
+- UI/runtime polish
+
+Larger v6 work is expected to explore:
+
+- scheduled tasks
+- durable background model workers
+- task queues
+- persistent task IDs
+- saved/reloadable context
+- context restoration
+- integrated GUI
+- terminal/session views
+- thread switching
+- human-review workflows
+- stronger task persistence
+- shared execution services
+
+v5 background supervision should not be confused with that larger design.
+
+v5 allows **individual tool operations** to continue asynchronously.
+
+The planned v6 architecture extends that idea toward **entire persistent model tasks and workers**.
+
+---
+
+# Building on Adapt
+
+Adapt is intended to be understandable and modifiable.
+
+You can:
+
+- change the tool grammar
+- change the tool-result role
+- replace prompts
+- add JSON tools
+- add remote tools
+- connect MCP servers
+- change model providers
+- modify safety rules
+- adjust Linux permissions
+- change the workspace layout
+- train a model specifically for your protocol
+
+I would rather keep the runtime understandable than hide every mechanism behind another abstraction layer.
+
+If you use it, tear it apart.
+
+If something breaks, tell me.
+
+If you build something interesting with it, I would like to hear about it.
+
+---
+
+# Created With Help From AI
+
+AI has been used extensively throughout the Echo project as an **interactive engineering tool**.
+
+I use AI for:
+
+- architecture discussion
+- implementation iteration
+- debugging
+- compiler-error analysis
+- research
+- model-training troubleshooting
+- edge-case reasoning
+- explaining unfamiliar language/runtime behavior
+
+Different systems have helped with different parts of the project, including Grok, ChatGPT, and Gemini.
+
+The workflow is interactive rather than one-shot generation:
+
+```text
+identify problem
+→ reason about architecture
+→ modify a small part
+→ compile
+→ inspect errors
+→ test
+→ observe behavior
+→ revise
+→ test again
+```
+
+I manually review, test, modify, and learn the code integrated into Adapt.
+
+The public Echo repositories intentionally preserve that development history instead of presenting the current architecture as if it appeared fully formed.
+
+---
+
+# Contributing / Feedback
+
+Feedback is welcome, especially from users running Adapt with different:
+
+- Linux distributions
+- model servers
+- models
+- cloud providers
+- chat templates
+- terminal emulators
+- GPU stacks
+
+Open an issue with whatever information you have.
+
+I only know for certain what works in the environments I can personally test.
 
 ---
 
 # Related Repositories
 
-### Project History
+### Project history
 
 [Echo Project Overview](https://github.com/charlesericwilson-portfolio/Echo_Project_Overview)
 
-### Model Training
+### Training
 
 [Echo Training Project](https://github.com/charlesericwilson-portfolio/Echo_training_project)
 
-### Echo Model
+### Model
 
 [Echo Instroder v2.2](https://huggingface.co/wilson-charles-e-85/Echo-Instroder-v2.2)
 
@@ -2265,11 +1378,8 @@ Again:
 
 Check the repository license before redistributing or incorporating Adapt into another project.
 
-This project is experimental software.
+Adapt is experimental software.
 
-Run AI-controlled tools with permissions appropriate to the level of risk you are willing to accept.
+Use permissions appropriate to the risk you are willing to accept.
 
-When using a cloud model provider, also consider what local information will leave the machine as part of model context or tool feedback.
-
----
-
+When using a cloud model provider, also consider what local information may leave the machine as part of conversation context or tool feedback.
