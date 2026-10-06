@@ -534,7 +534,7 @@ pub async fn handle_session_command(
 
                     let tool_content = format!(
                         "SESSION '{}' already has a command running in the background. \
-                        Wait for its completion or use a different uniquely named session \
+                        Call <wait/> to Wait for its completion or Inform the user and use a different uniquely named session \
                         for parallel work.",
                         session_name
                     );
@@ -623,7 +623,9 @@ pub async fn handle_session_command(
                     "SESSION '{}' is still running in the background.\n\
                     Marker: {}\n\
                     Continue reasoning from the current task. \
-                    Do not repeat this command while this session is still running.",
+                    you can call <wait/> if you need this data to continue \
+                    Either call <wait/> or inform the user and continue with the task.\
+                    Do not repeat this command Before you recieve the results.",
                     session_name,
                     marker_id
                 );

@@ -196,9 +196,10 @@ pub async fn handle_command(
                 "The command is still running in the background.\n\
                 Command: {}\n\
                 Status: RUNNING\n\
-                Do not run this command again.\n\
+                Do not repeat this command again.\n\
                 Do not repeat or replace this command while it is running.\n\
-                Wait for the background completion tool result before taking any action that depends on its output.Either update the user or go to the next available step in the task while you wait.",
+                You can call <wait/> if you need this data to continue. \n\
+                Either call <wait/> update the user or go to the next available step in tht task.",
                 command.trim()
             );
 

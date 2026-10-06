@@ -190,8 +190,9 @@ pub async fn handle_json_tool(
                     Tool: {}\n\
                     Invocation: {}\n\
                     Status: BACKGROUNDED\n\
-                    This invocation is already running.\n\
-                    Do not run it again.\n\
+                    This invocation is already running and you will be updated when it is complete.\n\
+                    Do not run the tool again.\n\
+                    You can call <wait/> if you need this result to continue or inform the user and carry out any other steps in the task.\n\
                     Its completed result will be provided in a later tool message.",
                     tool_name,
                     invocation
