@@ -52,6 +52,13 @@ pub async fn handle_cleanup(agent: &mut EchoAgent, _user_input: &str) -> Result<
     // Cleanup is the hard task boundary: discard any undelivered background
     // observations and terminate only tmux sessions owned by this Adapt process.
     agent.pending_background_output.clear();
+    agent.last_background_target = None;
+
+    agent.background_epoch.fetch_add(
+        1,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+
     let ended_sessions = end_all_sessions(&agent.active_sessions).await?;
 
     let output = format!(

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use tokio::fs;
 use chrono::Local;
 use serde_json::Value;
+use std::time::Duration;
+
 use crate::agent::EchoAgent;
 
 /// Simple vector math for cosine similarity
@@ -53,6 +55,10 @@ impl Memory {
 
     /// Get embedding - supports both chat and dedicated embeddings endpoint
     pub async fn get_embedding(&self, text: &str, agent: &EchoAgent) -> Result<Vec<f32>> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?;
+
         let is_chat_endpoint = agent.config.embeddings.url.contains("/chat/completions");
 
         if is_chat_endpoint {
@@ -68,7 +74,7 @@ impl Memory {
                 "temperature": 0.0
             });
 
-            let response = reqwest::Client::new()
+            let response = client
                 .post(&agent.config.embeddings.url)
                 .json(&payload)
                 .send()
@@ -94,7 +100,7 @@ impl Memory {
                 "model": &agent.config.embeddings.model,
             });
 
-            let response = reqwest::Client::new()
+            let response = client
                 .post(&agent.config.embeddings.url)
                 .json(&payload)
                 .send()

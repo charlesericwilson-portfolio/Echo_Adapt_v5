@@ -162,18 +162,24 @@ pub async fn handle_json_tool(
                 let background_invocation = invocation.clone();
                 let background_ready = agent.background_ready.clone();
 
+                let event_epoch = agent
+                    .background_epoch
+                    .load(std::sync::atomic::Ordering::SeqCst);
+
                 tokio::spawn(async move {
                     let event = match execution.await {
                         Ok(output) => ToolEvent {
                             tool_name: background_tool_name,
                             invocation: background_invocation,
                             output,
+                            epoch: event_epoch,
                         },
 
                         Err(error) => ToolEvent {
                             tool_name: background_tool_name,
                             invocation: background_invocation,
                             output: format!("JSON tool execution error: {}", error),
+                            epoch: event_epoch,
                         },
                     };
 

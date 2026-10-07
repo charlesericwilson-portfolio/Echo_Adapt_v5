@@ -11,6 +11,7 @@ pub struct ToolEvent {
     pub tool_name: String,
     pub invocation: String,
     pub output: String,
+    pub epoch: u64,
 }
 
 pub struct ToolSupervisor {

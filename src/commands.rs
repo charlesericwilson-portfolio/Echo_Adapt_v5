@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde_json::json;
 use crate::safety::is_command_safe;
 use crate::log::save_chat_log_message;
 use crate::summary::summarize_output;
@@ -17,11 +16,23 @@ pub async fn handle_command(
              crate::agent::YELLOW, command, crate::agent::RESET_COLOR);
 
     if let Err(e) = is_command_safe(command, &agent.config) {
-        println!("{}Safety block: {}{}", crate::agent::YELLOW, e, crate::agent::RESET_COLOR);
-        agent.messages.push(json!({
-            "role": &agent.config.messages.tool_role_name,
-            "content": format!("Safety block: {}", e)
-        }));
+        println!(
+            "{}Safety block: {}{}",
+            crate::agent::YELLOW,
+            e,
+            crate::agent::RESET_COLOR
+        );
+
+        let tool_content = format!("Safety block: {}", e);
+
+        agent.push_tool_result(&tool_content);
+
+        save_chat_log_message(
+            &agent.home_dir,
+            &agent.config.messages.tool_role_name,
+            &tool_content,
+        ).await?;
+
         return Ok(());
     }
 
@@ -43,10 +54,16 @@ pub async fn handle_command(
             .map_err(|e| anyhow::anyhow!("Failed to request sudo authentication: {}", e))?;
 
         if !status.success() {
-            agent.messages.push(json!({
-                "role": &agent.config.messages.tool_role_name,
-                "content": "Tool error: sudo authentication failed."
-            }));
+            let tool_content = "Tool error: sudo authentication failed.";
+
+            agent.push_tool_result(tool_content);
+
+            save_chat_log_message(
+                &agent.home_dir,
+                &agent.config.messages.tool_role_name,
+                tool_content,
+            ).await?;
+
             return Ok(());
         }
     }
@@ -152,6 +169,10 @@ pub async fn handle_command(
             let background_command = command.trim().to_string();
             let background_ready = agent.background_ready.clone();
 
+            let event_epoch = agent
+                .background_epoch
+                .load(std::sync::atomic::Ordering::SeqCst);
+
             tokio::spawn(async move {
                 let event = match wait_for_output.await {
                     Ok(output_cmd) => {
@@ -171,6 +192,7 @@ pub async fn handle_command(
                                 stdout.trim(),
                                 stderr.trim()
                             ),
+                            epoch: event_epoch,
                         }
                     }
 
@@ -181,6 +203,7 @@ pub async fn handle_command(
                             "Command execution error: {}",
                             error
                         ),
+                        epoch: event_epoch,
                     },
                 };
 
@@ -199,7 +222,7 @@ pub async fn handle_command(
                 Do not repeat this command again.\n\
                 Do not repeat or replace this command while it is running.\n\
                 You can call <wait/> if you need this data to continue. \n\
-                Either call <wait/> update the user or go to the next available step in tht task.",
+                Either call <wait/> update the user or go to the next available step in the task.",
                 command.trim()
             );
 

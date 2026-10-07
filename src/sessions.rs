@@ -298,6 +298,26 @@ pub async fn execute_in_session(
 
                 match output {
                     Ok(output) => {
+                        if !output.status.success() {
+                            let mut session_map = sessions.lock().await;
+
+                            if let Some(state) = session_map.get_mut(&background_name) {
+                                state.push_completed(
+                                    &background_name,
+                                    marker_id,
+                                    background_command.clone(),
+                                    "Session terminated before the command finished.".to_string(),
+                                );
+                            }
+
+                            background_ready.store(
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+
+                            break;
+                        }
+
                         let raw =
                             String::from_utf8_lossy(&output.stdout).to_string();
 
@@ -459,7 +479,10 @@ pub async fn start_session_cleanup_task(
 
             let to_remove: Vec<String> = sessions
                 .iter()
-                .filter(|(_, state)| now.duration_since(state.last_used) > timeout)
+                .filter(|(_, state)| {
+                    !state.is_running()
+                        && now.duration_since(state.last_used) > timeout
+                })
                 .map(|(name, _)| name.clone())
                 .collect();
 
@@ -625,7 +648,7 @@ pub async fn handle_session_command(
                     Continue reasoning from the current task. \
                     you can call <wait/> if you need this data to continue \
                     Either call <wait/> or inform the user and continue with the task.\
-                    Do not repeat this command Before you recieve the results.",
+                    Do not repeat this command Before you receive the results.",
                     session_name,
                     marker_id
                 );

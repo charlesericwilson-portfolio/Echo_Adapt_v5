@@ -12,8 +12,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::log::save_chat_log_message;
-use crate::sessions::handle_completed_session_event;
-use crate::summary::summarize_output;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WaitTarget {
@@ -77,97 +75,7 @@ pub async fn handle_wait(
             return Ok(());
         }
 
-        // Collect completed session work.
-        //
-        // Session completions live inside SessionState rather than the
-        // general ToolSupervisor channel.
-        let mut completed_session_events = Vec::new();
-
-        {
-            let mut sessions = agent.active_sessions.lock().await;
-
-            for state in sessions.values_mut() {
-                while let Some(event) = state.take_pending() {
-                    completed_session_events.push(event);
-                }
-            }
-        }
-
-        for event in completed_session_events {
-            handle_completed_session_event(agent, event).await?;
-        }
-
-        // Collect completed command / JSON work.
-        while let Some(event) = agent.tool_supervisor.take_pending() {
-            let output_for_model =
-                match summarize_output(&event.output, &agent.config).await {
-                    Ok(output) => output,
-
-                    Err(error) => {
-                        eprintln!(
-                            "{}Echo: [BACKGROUND SUMMARY ERROR] {}. Using raw output.{}",
-                            crate::agent::YELLOW,
-                            error,
-                            crate::agent::RESET_COLOR
-                        );
-
-                        event.output.clone()
-                    }
-                };
-
-            let tool_content = format!(
-                "Background tool completed.\n\
-                 Tool: {}\n\
-                 Invocation: {}\n\
-                 Status: COMPLETED\n\
-                 Output:\n{}",
-                event.tool_name,
-                event.invocation,
-                output_for_model
-            );
-
-            let event_target = if event.tool_name == "command" {
-                WaitTarget::Command {
-                    invocation: event.invocation.clone(),
-                }
-            } else {
-                WaitTarget::Json {
-                    tool_name: event.tool_name.clone(),
-                    invocation: event.invocation.clone(),
-                }
-            };
-
-            agent.pending_background_output.push(
-                PendingBackgroundOutput {
-                    target: event_target,
-                    content: tool_content.clone(),
-                }
-            );
-
-            save_chat_log_message(
-                &agent.home_dir,
-                &agent.config.messages.tool_role_name,
-                &tool_content,
-            )
-            .await?;
-
-            let db_summary: String =
-                event.output.chars().take(500).collect();
-
-            if let Err(error) = agent.db.log_tool_call(
-                &event.tool_name,
-                &event.invocation,
-                &db_summary,
-            ) {
-                eprintln!(
-                    "{}Echo: [BACKGROUND DB ERROR] Failed to log '{}' completion: {}{}",
-                    crate::agent::YELLOW,
-                    event.tool_name,
-                    error,
-                    crate::agent::RESET_COLOR
-                );
-            }
-        }
+        agent.collect_background_completions().await?;
 
         // Ctrl-\ already sets this flag in the normal agent runtime.
         // Honor it here too so <wait/> cannot make Adapt impossible to interrupt.

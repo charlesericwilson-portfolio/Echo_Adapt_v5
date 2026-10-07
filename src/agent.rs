@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use anyhow::Result;
 use std::collections::HashMap;
 use dirs_next as dirs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::supervisor::{SessionState, ToolSupervisor};
 use crate::sessions::start_session_cleanup_task;
@@ -50,10 +50,10 @@ pub struct EchoAgent {
     pub pending_background_output: Vec<PendingBackgroundOutput>,
     pub last_background_target: Option<WaitTarget>,
     pub background_ready: Arc<AtomicBool>,
+    pub background_epoch: Arc<AtomicU64>,
 
     pub remote_tool_registry: RemoteToolRegistry,
 
-    // Soft duplicate-tool detection. This never blocks execution.
     pub last_tool_signature: Option<String>,
     pub repeated_tool_call_count: u32,
 }
@@ -158,6 +158,7 @@ impl EchoAgent {
         let active_sessions = Arc::new(Mutex::new(HashMap::new()));
         let tool_supervisor = ToolSupervisor::new();
         let background_ready = Arc::new(AtomicBool::new(false));
+        let background_epoch = Arc::new(AtomicU64::new(0));
 
         let agent = Self {
             config,
@@ -169,6 +170,7 @@ impl EchoAgent {
             stop_generation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tool_supervisor,
             background_ready,
+            background_epoch,
             pending_background_output: Vec::new(),
             last_background_target: None,
             remote_tool_registry,
@@ -357,7 +359,10 @@ let trimmed_input = user_input.trim();
                 // but Echo receives a hint to reassess instead of blindly retrying.
                 let tool_signature = tool_call_signature(&tool_call.kind);
                 if let Some(recovery_hint) = self.note_tool_call(&tool_signature) {
-                    self.push_tool_result(&recovery_hint);
+                    self.messages.push(json!({
+                        "role": &self.config.messages.tool_role_name,
+                        "content": &recovery_hint
+                    }));
                     save_chat_log_message(
                         &self.home_dir,
                         &self.config.messages.tool_role_name,
@@ -434,7 +439,7 @@ let trimmed_input = user_input.trim();
         }
     }
 
-    async fn collect_background_completions(&mut self) -> Result<()> {
+    pub(crate) async fn collect_background_completions(&mut self) -> Result<()> {
         let mut completed_events = Vec::new();
 
         {
@@ -452,6 +457,15 @@ let trimmed_input = user_input.trim();
         }
 
         while let Some(event) = self.tool_supervisor.take_pending() {
+
+            let current_epoch = self
+                .background_epoch
+                .load(Ordering::SeqCst);
+
+            if event.epoch != current_epoch {
+                continue;
+            }
+
             let output_for_model = match summarize_output(
                 &event.output,
                 &self.config,
@@ -529,12 +543,22 @@ let trimmed_input = user_input.trim();
         Ok(())
     }
 
-    fn inject_pending_background_output(&mut self) -> bool {
+    fn drain_pending_background(&mut self) -> Option<String> {
         if self.pending_background_output.is_empty() {
-            return false;
+            return None;
         }
 
-        let background = self
+        if let Some(target) = &self.last_background_target {
+            if self
+                .pending_background_output
+                .iter()
+                .any(|item| &item.target == target)
+            {
+                self.last_background_target = None;
+            }
+        }
+
+        let joined = self
             .pending_background_output
             .iter()
             .map(|item| item.content.as_str())
@@ -542,6 +566,14 @@ let trimmed_input = user_input.trim();
             .join("\n\n---\n\n");
 
         self.pending_background_output.clear();
+
+        Some(joined)
+    }
+
+    fn inject_pending_background_output(&mut self) -> bool {
+        let Some(background) = self.drain_pending_background() else {
+            return false;
+        };
 
         self.messages.push(json!({
             "role": &self.config.messages.tool_role_name,
@@ -552,6 +584,7 @@ let trimmed_input = user_input.trim();
     }
 
     async fn handle_max_trigger(&mut self) -> Result<()> {
+
         println!(
             "{}⚠️ [SAFETY TRIGGER] Model has responded {} times without user input. Pausing...{}",
             YELLOW, self.config.context.max_turns, RESET_COLOR
@@ -606,25 +639,17 @@ If repetition is intentional (for example, polling or verifying a changed state)
     }
 
     pub fn push_tool_result(&mut self, content: &str) {
-        if self.pending_background_output.is_empty() {
-            self.messages.push(json!({
-                "role": &self.config.messages.tool_role_name,
-                "content": content
-            }));
-        } else {
-            let extra = self
-                .pending_background_output
-                .iter()
-                .map(|item| item.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n---\n\n");
-            self.pending_background_output.clear();
+        let tool_content = match self.drain_pending_background() {
+            Some(extra) => {
+                format!("{}\n\n---\n\n{}", content, extra)
+            }
+            None => content.to_string(),
+        };
 
-            self.messages.push(json!({
-                "role": &self.config.messages.tool_role_name,
-                "content": format!("{}\n\n---\n\n{}", content, extra)
-            }));
-        }
+        self.messages.push(json!({
+            "role": &self.config.messages.tool_role_name,
+            "content": tool_content
+        }));
     }
 }
 
