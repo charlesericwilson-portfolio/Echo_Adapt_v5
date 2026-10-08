@@ -12,8 +12,6 @@ pub async fn handle_command(
     _user_input: &str,
     command: &str,
 ) -> Result<()> {
-    println!("{}Echo: Executing COMMAND → {}{}",
-             crate::agent::YELLOW, command, crate::agent::RESET_COLOR);
 
     if let Err(e) = is_command_safe(command, &agent.config) {
         println!(

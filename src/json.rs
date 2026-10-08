@@ -18,8 +18,6 @@ pub async fn handle_json_tool(
     _current_response: &str,
     json_content: &str,
 ) -> Result<()> {
-    println!("{}Echo: Detected JSON tool call{}",
-             crate::agent::YELLOW, crate::agent::RESET_COLOR);
 
     let enabled_tools = &agent.config.json_tools.enabled;
 
@@ -114,12 +112,6 @@ pub async fn handle_json_tool(
             Ok(result) => {
                 match result {
                     Ok(result) => {
-                        println!(
-                            "{}Echo: [TOOL] {} executed{}",
-                            crate::agent::YELLOW,
-                            tool_name,
-                            crate::agent::RESET_COLOR
-                        );
 
                         let tool_content = format!("Tool output:\n{}", result);
 
@@ -513,7 +505,7 @@ pub async fn handle_memory_tool(
 }
 
 //  HELPERS
-fn extract_tool_name(json_str: &str) -> Option<String> {
+pub(crate) fn extract_tool_name(json_str: &str) -> Option<String> {
     if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
         if let Some(name) = parsed["name"].as_str() {
             return Some(name.to_string());

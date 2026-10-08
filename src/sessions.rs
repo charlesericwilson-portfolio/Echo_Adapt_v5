@@ -209,12 +209,6 @@ pub async fn execute_in_session(
         .status()
         .await?;
 
-    println!(
-        "{}[Session] Waiting for command to finish...{}",
-        crate::agent::YELLOW,
-        crate::agent::RESET_COLOR
-    );
-
     let foreground_start = std::time::Instant::now();
 
     loop {
@@ -581,14 +575,6 @@ pub async fn handle_session_command(
                 }
             }
         }
-
-        println!(
-            "{}Echo: Executing in SESSION '{}' → {}{}",
-            crate::agent::YELLOW,
-            session_name,
-            cmd,
-            crate::agent::RESET_COLOR
-        );
 
         start_or_reuse_session(
             agent.home_dir.clone(),

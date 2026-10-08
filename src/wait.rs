@@ -52,11 +52,8 @@ pub async fn handle_wait(
         return Ok(());
     };
 
-    println!(
-        "{}Echo: Waiting for background tool result...{}",
-        crate::agent::YELLOW,
-        crate::agent::RESET_COLOR
-    );
+    let spinner = crate::ui::spinner("Waiting for tool... 0s");
+    let started = std::time::Instant::now();
 
     loop {
         // The target may already have completed before Echo emitted <wait/>.
@@ -67,6 +64,8 @@ pub async fn handle_wait(
         {
             let completed =
                 agent.pending_background_output.remove(position);
+
+            spinner.finish_and_clear();
 
             push_wait_result(agent, &completed.content).await?;
 
@@ -82,6 +81,8 @@ pub async fn handle_wait(
         if agent.stop_generation.load(Ordering::SeqCst) {
             agent.stop_generation.store(false, Ordering::SeqCst);
 
+            spinner.finish_and_clear();
+
             let tool_content =
                 "Wait interrupted by the human operator.";
 
@@ -89,6 +90,11 @@ pub async fn handle_wait(
 
             return Ok(());
         }
+
+        spinner.set_message(format!(
+            "Waiting for tool... {}s",
+            started.elapsed().as_secs()
+        ));
 
         // Don't burn a CPU core while waiting for completion.
         tokio::time::sleep(Duration::from_millis(250)).await;

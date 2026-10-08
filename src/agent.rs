@@ -311,6 +311,8 @@ let trimmed_input = user_input.trim();
                 request = request.bearer_auth(&self.config.endpoint.api_key);
             }
 
+            let spinner = crate::ui::spinner("Reasoning...");
+
             let response = request
                 .send()
                 .await?
@@ -322,6 +324,8 @@ let trimmed_input = user_input.trim();
                 &self.config.endpoint,
                 &response_json,
             )?;
+
+            spinner.finish_and_clear();
 
             save_chat_log_message(
                 &self.home_dir,
@@ -370,6 +374,44 @@ let trimmed_input = user_input.trim();
                     ).await?;
                 }
 
+                let tool_spinner_message = match &tool_call.kind {
+                    ParsedToolCallKind::Command(command) => {
+                        if command.trim().to_lowercase().starts_with("sudo ") {
+                            None
+                        } else {
+                            Some(format!("Running command: {}", command.trim()))
+                        }
+                    }
+
+                    ParsedToolCallKind::Session { name, command } => {
+                        Some(format!(
+                            "Running session '{}': {}",
+                            name.trim(),
+                            command.trim()
+                        ))
+                    }
+
+                    ParsedToolCallKind::EndSession(name) => {
+                        Some(format!("Ending session: {}", name.trim()))
+                    }
+
+                    ParsedToolCallKind::Json(json_content) => {
+                        let tool_name = crate::json::extract_tool_name(json_content)
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        Some(format!("Running JSON tool: {}", tool_name))
+                    }
+
+                    ParsedToolCallKind::Cleanup => {
+                        Some("Running cleanup...".to_string())
+                    }
+
+                    ParsedToolCallKind::Wait => None,
+                };
+
+                let spinner = tool_spinner_message
+                    .map(crate::ui::spinner);
+
                 match tool_call.kind {
                     ParsedToolCallKind::Command(command) => {
                         crate::commands::handle_command(
@@ -413,6 +455,10 @@ let trimmed_input = user_input.trim();
                     ParsedToolCallKind::Wait => {
                         crate::wait::handle_wait(self).await?;
                     }
+                }
+
+                if let Some(spinner) = spinner {
+                    spinner.finish_and_clear();
                 }
 
                 continue;
