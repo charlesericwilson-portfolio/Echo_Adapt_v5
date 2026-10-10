@@ -3,12 +3,17 @@ name = "adapt_server"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+rocm = ["llama-cpp-2/rocm"]
+cuda = ["llama-cpp-2/cuda"]
+
 [dependencies]
 anyhow = "1"
 axum = "0.8"
+llama-cpp-2 = { version = "=0.1.156", features = ["rocm"] }
 clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
-llama-cpp-2 = { version = "0.1.156", features = ["rocm"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
