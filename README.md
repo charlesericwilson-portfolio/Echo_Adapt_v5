@@ -1,4 +1,4 @@
-# Echo Adapt v5.1
+# Echo Adapt v5.2
 
 ## ADAPT — Adaptive Digital Agent Protocol & Tools
 
