@@ -12,7 +12,7 @@ Adapt gives language models a controlled way to use real operating-system tools 
 
 The basic idea is intentionally simple:
 
-> **If a model understands that it should run a shell command, use a persistent terminal, or call a structured function, Adapt gives it a way to actually do it.**
+> **If a model understands that it should run a shell command, use a persistent terminal, call a structured function, wait for background work, or clean up after a task, Adapt gives it a way to actually do it.**
 
 Adapt is not tied to a large agent framework, a provider-specific tool API, or a hardcoded Jinja chat template.
 
@@ -24,8 +24,8 @@ I primarily use it with my own fine-tuned model, **Echo Instroder 14B**, but fin
 - Windows: Windows 11 through WSL2
 - Native Windows: not supported
 - Development status: active / experimental
-- Current runtime: Adapt v5.1
-- v5.2 development includes continued MCP/tool-server work and runtime improvements
+- Current runtime: **Adapt v5.2**
+- v5.2 adds generalized foreground-to-background tool execution, explicit wait semantics, idle wake/re-entry, lifecycle fencing for stale background results, runtime UI/status improvements, and completed MCP/tool-server integration work
 
 Related projects:
 
@@ -61,7 +61,15 @@ assistant reasoning
 
 For long-running work, execution and model reasoning can temporarily diverge. Adapt can move the operation into the background, allow the model to continue working, and later return the completed result as a normal tool observation.
 
-That separation between **reasoning** and **execution state** is one of the main architectural goals of the project.
+If the model reaches a point where it cannot continue until that result exists, it can explicitly call:
+
+```xml
+<wait/>
+```
+
+If the model instead goes idle, Adapt can wake the agent loop when completed background work becomes available without fabricating a user message.
+
+That separation between **reasoning**, **execution state**, and **tool completion** is one of the main architectural goals of the project.
 
 ---
 
@@ -90,8 +98,10 @@ flowchart TD
     B -->|Model calls wait| W
     W -->|Target completes| R
 
-    B -->|Completion while model active| R
-    B -->|Completion while chat idle| I[Idle Wake]
+    B -->|Completion while model active| Q[Queue Completion]
+    Q --> R
+
+    B -->|Completion while chat idle| I[Background Ready / Idle Wake]
     I --> R
 
     J --> TS[Optional Adapt Tool Server]
@@ -140,13 +150,13 @@ Programs such as:
 - `msfconsole`
 - long-running CLI applications
 
-do not work well as isolated subprocess calls.
+Do not work well as isolated subprocess calls.
 
 Adapt uses named **tmux** sessions when persistent state is required.
 
 ## Long-running work should not unnecessarily block reasoning
 
-Commands receive a short foreground execution window.
+Commands, JSON tools, and persistent-session work receive a short foreground execution window.
 
 If an operation continues running, Adapt can supervise it asynchronously while returning control to the model.
 
@@ -157,6 +167,24 @@ The model can then continue independent work, explicitly wait for a required res
 Adapt supports a configurable tool-message role.
 
 The human did not produce command output, so Adapt does not need to pretend that tool output was another human message.
+
+The same semantic rule applies to background state and background completion.
+
+## The runtime should own execution state
+
+The model should decide **what** to do.
+
+Adapt should decide **how execution state is tracked safely**.
+
+That includes:
+
+- foreground versus background execution,
+- pending completion queues,
+- background-target tracking,
+- task-boundary cleanup,
+- stale-result rejection,
+- session lifecycle,
+- and model-loop re-entry.
 
 ## Configuration should replace recompilation where practical
 
@@ -170,6 +198,39 @@ Provider-specific request and response handling belongs in the provider layer.
 
 ---
 
+# What Changed in v5.2
+
+Adapt v5.2 is primarily a **background-execution and lifecycle-hardening release**.
+
+The main additions are:
+
+- foreground-to-background handoff for supported command, JSON, and persistent-session work,
+- explicit `<wait/>` behavior for dependency blocking,
+- background completion queues,
+- automatic model-loop wake/re-entry when work completes while the chat is idle,
+- targeted waiting through the most recently relevant background target,
+- preservation of unrelated background completions while waiting on a specific dependency,
+- stale-background-result protection through runtime epochs,
+- cleanup-time pending-state reset,
+- cleanup-time clearing of stale wait targets,
+- cleanup of Adapt-owned tmux sessions without treating arbitrary external tmux sessions as Adapt state,
+- session lifecycle/reaper hardening,
+- repeat-call recovery hints for models that attempt the same action again while work is already running,
+- improved pending-background-output handling,
+- unified/canonical background-result collection paths,
+- runtime spinner/status UI for model reasoning and tool execution,
+- elapsed waiting display for `<wait/>`,
+- command and sudo logging fixes,
+- safety-path cleanup around command execution,
+- an HTTP timeout for embedding requests,
+- and completed MCP interoperability through the optional standalone tool server.
+
+The core agent loop still accepts **one model-generated tool action per model turn**.
+
+v5.2 does not convert Adapt into a multi-action concurrent planner. Multiple background operations may exist across turns, but each model turn still produces at most one executable Adapt action.
+
+---
+
 # Core Capabilities
 
 ### Execution
@@ -180,6 +241,8 @@ Provider-specific request and response handling belongs in the provider layer.
 - configurable tool tags
 - configurable tool-result role
 - one model-generated tool action per model turn
+- foreground execution window
+- background handoff for long-running supported tools
 
 ### Persistent terminal sessions
 
@@ -189,23 +252,50 @@ Provider-specific request and response handling belongs in the provider layer.
 - bounded output extraction
 - same-session running-command protection
 - inactive-session cleanup
+- external-session termination detection
 - persistent state across tool calls
+- Adapt process/session namespacing
 
 ### Asynchronous execution
 
 - short foreground execution window
 - foreground-to-background handoff
 - background command supervision
+- background JSON-tool supervision
+- background persistent-session supervision
 - queued completion events
 - completed-result reinjection
 - idle model wake when background work finishes
 - explicit `<wait/>` for a specific dependency
+- unrelated completion preservation while waiting
+- soft repeat-call recovery hints
+
+### Lifecycle hardening
+
+- background epoch fencing
+- stale completion rejection
+- cleanup-time pending queue clearing
+- cleanup-time wait-target clearing
+- cleanup-time background epoch increment
+- Adapt-owned session cleanup
+- stale wait-target fixes
+- canonical pending-result collection
+
+### Runtime UI
+
+- reasoning spinner
+- command execution spinner
+- JSON-tool spinner
+- persistent-session spinner
+- wait spinner with elapsed time
+- cleaner human-visible execution state without changing tool semantics
 
 ### Runtime services
 
 - semantic cross-thread memory
 - Markdown-backed memory storage
 - embedding-based retrieval
+- embedding HTTP timeout
 - optional tool-output summarization
 - context compression
 - SQLite tool logging
@@ -244,6 +334,8 @@ The default tool syntax is deliberately small.
 
 Use this for ordinary shell commands that do not need persistent terminal state.
 
+Long-running commands can cross the foreground execution window and be supervised in the background.
+
 ## Persistent session
 
 ```xml
@@ -251,6 +343,8 @@ Use this for ordinary shell commands that do not need persistent terminal state.
 ```
 
 Subsequent commands can reuse the same session name.
+
+Persistent sessions are useful when shell/process state must survive between tool calls.
 
 ## End session
 
@@ -275,6 +369,8 @@ JSON tools are used for structured functions, local integrations, remote tools, 
 
 Adapt accepts several common JSON function-call envelope styles.
 
+Long-running JSON tools can use the same foreground-to-background execution path rather than forcing the entire model loop to remain blocked.
+
 ## Wait
 
 ```xml
@@ -287,9 +383,11 @@ It means:
 
 > **The model already knows what it needs to do next, but it requires the result of the most recently relevant backgrounded operation before continuing.**
 
-Adapt blocks on that specific background result rather than waiting for every running operation.
+Adapt waits on the current background target rather than blindly waiting for every running operation.
 
-If independent work remains, the model can continue working instead.
+If unrelated background work completes while Adapt is waiting on a specific dependency, that completion remains queued for normal delivery rather than being confused with the awaited result.
+
+If independent work remains, the model should continue working instead of calling `<wait/>`.
 
 If the model goes idle without calling `<wait/>`, completed background results can still reopen the agent loop automatically.
 
@@ -299,9 +397,47 @@ If the model goes idle without calling `<wait/>`, completed background results c
 <cleanup/>
 ```
 
-Cleanup removes temporary workspace artifacts and acts as a task-cleanup boundary for Adapt-managed temporary state.
+Cleanup removes temporary workspace artifacts and acts as a task-cleanup boundary for Adapt-managed runtime state.
 
-Echo is trained to use this behavior directly.
+In v5.2 cleanup also participates in lifecycle isolation by clearing pending background state, clearing the active background target, advancing the runtime background epoch, and cleaning up Adapt-owned tmux sessions.
+
+That prevents stale work from a completed task from being reintroduced into a later task.
+
+Echo is trained to use cleanup behavior directly.
+
+---
+
+# Tool Parsing and Turn Semantics
+
+Adapt accepts **one model-generated tool action per model turn**.
+
+The parser operates on the newly generated assistant turn rather than repeatedly rescanning old executable content from the entire conversation.
+
+When multiple complete candidate tool tags exist in a single new assistant response, Adapt executes only the final complete valid action selected by the parser.
+
+Executable tool tags are removed from the live retained assistant context after the request has been captured for execution so an old tag is not accidentally rediscovered later.
+
+Persistent logs can still retain the original raw assistant output for debugging and training-data review.
+
+Conceptually:
+
+```text
+raw assistant output
+        ↓
+persist transcript
+        ↓
+parse current turn
+        ↓
+capture one executable action
+        ↓
+remove executable tag from live context
+        ↓
+execute
+        ↓
+tool result
+        ↓
+next model turn
+```
 
 ---
 
@@ -309,7 +445,7 @@ Echo is trained to use this behavior directly.
 
 Long-running execution is one of the main differences between Adapt and a simple request/response tool loop.
 
-A tool starts normally.
+A supported tool starts normally.
 
 If it finishes within the foreground window, its result is returned immediately.
 
@@ -349,21 +485,127 @@ block until that specific result completes
 
 Background completion does not require the human to manually restart the agent.
 
-If completed work arrives while the chat is idle, Adapt can convert that completion into a tool turn and reopen the model loop.
+If completed work arrives while the chat is idle, Adapt can surface a background-ready event, inject the completed tool result, and call the normal model-processing path again with no fabricated user message.
 
-This preserves the normal semantic sequence:
+This preserves the semantic sequence:
 
 ```text
 assistant
-tool
+  ↓
+tool status
+  ↓
 assistant
-tool
+  ↓
+tool completion
+  ↓
 assistant
 ```
 
-even when the tool operation itself completes asynchronously.
+Even when the tool operation itself completes asynchronously.
 
 Completion order is determined by the work itself rather than the order in which background jobs were started.
+
+---
+
+# Automatic Background Wake
+
+A common problem with asynchronous agents is that background work may finish after the model has stopped generating and the human has not typed another message.
+
+v5.2 adds an idle wake path for that case.
+
+Conceptually:
+
+```text
+model starts long operation
+        ↓
+operation backgrounds
+        ↓
+model has nothing else to do
+        ↓
+chat becomes idle
+        ↓
+background work completes
+        ↓
+completion marked ready
+        ↓
+runtime injects completed tool result
+        ↓
+normal agent loop resumes
+```
+
+No synthetic `user` message is created merely to wake the model.
+
+The completion remains a tool observation because that is what actually happened.
+
+---
+
+# Wait Targeting
+
+`<wait/>` does not mean "wait for anything that happens to finish next."
+
+Adapt tracks the most recently relevant background target.
+
+When the model calls `<wait/>`, the runtime blocks for that target.
+
+Other completed background work remains available through the normal pending-event path.
+
+This matters when several operations exist at once:
+
+```text
+job A → background
+job B → background
+job C → background
+```
+
+If the model's next decision depends specifically on job B, waiting should not accidentally consume job A or job C as if either were B's answer.
+
+Cleanup clears the stored background target so a future task cannot accidentally wait on stale work.
+
+---
+
+# Repeat-call Recovery
+
+Small and local models sometimes respond to "still running" by issuing the same tool call again.
+
+Adapt v5.2 keeps repeat detection intentionally soft.
+
+The runtime can provide a recovery hint when the same action is repeatedly requested, but repeat detection is not treated as a hard execution ban.
+
+The model is still responsible for deciding whether a retry is actually appropriate.
+
+This allows Adapt to discourage accidental duplicate work without turning a heuristic into a rigid control layer.
+
+---
+
+# Background Epoch Fencing
+
+Asynchronous work creates a lifecycle problem: an operation from an old task may complete after the user or model has already cleaned up and moved on.
+
+v5.2 uses a background epoch to separate those lifetimes.
+
+Conceptually:
+
+```text
+task epoch 7
+    ↓
+start background work
+    ↓
+cleanup
+    ↓
+clear pending state
+clear active wait target
+advance to epoch 8
+    ↓
+old epoch-7 completion arrives
+    ↓
+drop as stale
+```
+
+Command and JSON background events carry the epoch they were created under.
+
+A completion from an older epoch is not allowed to leak into the new task context.
+
+This is deliberately a runtime boundary rather than something left to the model prompt.
 
 ---
 
@@ -397,6 +639,28 @@ Adapt-managed session names are internally namespaced to avoid collisions betwee
 
 Sessions are intentionally capable of surviving an Adapt chat restart.
 
+v5.2 also hardens session lifecycle handling so externally terminated tmux sessions and inactive Adapt-managed sessions do not leave stale running state behind indefinitely.
+
+---
+
+# Runtime UI and Status Feedback
+
+v5.2 adds a lightweight terminal UI layer using runtime spinners/status indicators.
+
+The goal is not to turn the CLI into a graphical interface. It is to make long operations understandable without flooding the terminal with repeated status text.
+
+Current status displays cover:
+
+- model reasoning / inference,
+- command execution,
+- JSON-tool execution,
+- persistent-session execution,
+- and `<wait/>` elapsed time.
+
+Sudo authentication remains a normal synchronous human boundary rather than being hidden behind a spinner.
+
+The UI layer does not change tool semantics. It only makes existing runtime state easier for the human to see.
+
 ---
 
 # Remote Tool Server and MCP
@@ -409,7 +673,7 @@ When enabled, Adapt performs startup discovery through:
 GET /tools
 ```
 
-and executes permitted remote tools through:
+And executes permitted remote tools through:
 
 ```text
 POST /execute
@@ -500,7 +764,7 @@ The model can request:
 web_search(query)
 ```
 
-without needing the underlying external-service key.
+Without needing the underlying external-service key.
 
 ## MCP interoperability
 
@@ -508,9 +772,27 @@ The tool server can optionally act as an MCP client.
 
 This allows existing MCP servers to expose capabilities through Adapt without requiring the main Adapt runtime or the model to switch to an MCP-specific tool grammar.
 
-The tool server translates between Adapt's existing JSON interface and the MCP server.
+The tool server translates between Adapt's existing JSON interface and MCP.
 
-The primary Adapt process therefore remains relatively small.
+Conceptually:
+
+```text
+model
+  ↓
+Adapt JSON tool interface
+  ↓
+tool server
+  ↓
+Bearer authentication
+  ↓
+server-side global / instance authorization
+  ↓
+MCP translation
+  ↓
+external MCP server
+```
+
+The primary Adapt process therefore remains relatively small and the model continues to see a single tool vocabulary.
 
 ---
 
@@ -569,14 +851,14 @@ Compatibility does **not** guarantee identical behavior.
 
 Providers may differ in:
 
-- accepted message roles
-- reasoning fields
-- tool-result requirements
-- image handling
-- context limits
-- supported request fields
-- response envelopes
-- provider-specific features
+- accepted message roles,
+- reasoning fields,
+- tool-result requirements,
+- image handling,
+- context limits,
+- supported request fields,
+- response envelopes,
+- provider-specific features.
 
 If a provider requires a fundamentally different request or response format, that belongs in the provider layer rather than being spread throughout the agent runtime.
 
@@ -619,7 +901,7 @@ assistant
 tool
 ```
 
-rather than presenting tool output as another human message.
+Rather than presenting tool output as another human message.
 
 Adapt therefore exposes the tool-result role through configuration:
 
@@ -635,6 +917,22 @@ Others are strict.
 If a model only accepts `user` and `assistant`, the configured Adapt role or the model template may need to be adjusted.
 
 Adapt cannot force an incompatible template to accept a role its parser rejects.
+
+The same semantic model applies to asynchronous execution:
+
+```text
+assistant
+  ↓ starts work
+
+tool
+  ↓ operation is running in background
+
+assistant
+  ↓ continues reasoning
+
+tool
+  ↓ completed background result
+```
 
 ---
 
@@ -654,6 +952,8 @@ read_memory(query, limit)
 Rather than injecting the entire memory file into every prompt, Adapt embeds the current query and retrieves relevant entries.
 
 The embedding backend is configurable and can use a dedicated embedding endpoint or a compatible model path depending on the deployment.
+
+v5.2 places a bounded HTTP timeout on embedding requests so a dead or unreachable embedding service does not hang that path indefinitely.
 
 ---
 
@@ -683,12 +983,13 @@ Adapt can optionally send oversized tool results through a smaller summarizer mo
 
 Typical uses include:
 
-- scanners
-- logs
-- package-manager output
-- debugging output
-- verbose commands
-- long terminal-session output
+- scanners,
+- logs,
+- package-manager output,
+- debugging output,
+- verbose commands,
+- long terminal-session output,
+- completed background operations.
 
 If output remains below the configured raw-output threshold, it is returned directly.
 
@@ -710,6 +1011,8 @@ Adapt maintains two primary forms of execution history.
 
 Tool activity and compact output summaries can be stored in SQLite for runtime inspection and recovery-related state.
 
+v5.2 also tightens logging behavior around command execution and sudo-related paths so runtime records better match the action that actually occurred.
+
 ## JSONL conversation log
 
 Adapt also stores a sequential transcript preserving role distinctions such as:
@@ -725,11 +1028,13 @@ assistant
 
 This is useful for:
 
-- debugging
-- evaluating agent behavior
-- reviewing failure recovery
-- examining tool-use trajectories
-- building or reviewing training data
+- debugging,
+- evaluating agent behavior,
+- reviewing failure recovery,
+- examining tool-use trajectories,
+- building or reviewing training data.
+
+Raw assistant responses can be persisted before executable tags are removed from the live model context.
 
 Logs may contain sensitive user or machine information.
 
@@ -741,20 +1046,25 @@ Adapt's security approach is intentionally layered.
 
 Current layers include:
 
-- model instructions
-- explicit tool syntax
-- Rust-side command safety checks
-- configurable deny rules
-- obfuscation checks
-- Linux filesystem and process permissions
-- optional dedicated model user
-- optional Bubblewrap isolation
-- configurable sudo access
-- capability enforcement on the remote tool server
+- model instructions,
+- explicit tool syntax,
+- Rust-side command safety checks,
+- configurable deny rules,
+- obfuscation checks,
+- Linux filesystem and process permissions,
+- optional dedicated model user,
+- optional Bubblewrap isolation,
+- configurable sudo access,
+- capability enforcement on the remote tool server,
+- background lifecycle fencing.
 
 No single layer should be treated as perfect protection.
 
 The operating system remains the final authority over what the Adapt process can actually do.
+
+Background epoch fencing is a state-integrity mechanism. It prevents stale asynchronous results from crossing task boundaries, but it does not undo side effects already performed by an old process.
+
+If a long-running process has already modified the machine, dropping its later tool result does not reverse that modification.
 
 ---
 
@@ -824,6 +1134,34 @@ Choose a boundary appropriate for the data and authority exposed to the runtime.
 
 ---
 
+# Python Virtual Environment Support
+
+The restricted-user setup creates a persistent Python virtual environment at:
+
+```text
+/home/model-user/.venv
+```
+
+When Adapt creates a new tmux session, it checks for an Adapt-managed virtual environment under that user's home directory.
+
+If one exists, Adapt exposes:
+
+```text
+VIRTUAL_ENV
+```
+
+And prepends:
+
+```text
+.venv/bin
+```
+
+To the session `PATH`.
+
+The model therefore does not need to manually activate the environment every time it opens a persistent session.
+
+---
+
 # Sudo Behavior
 
 Adapt does not collect or store the user's sudo password.
@@ -835,6 +1173,8 @@ Restricted deployments may configure specific administrator-approved sudo comman
 Be careful when expanding those permissions.
 
 Allowing package installation as root, for example, can indirectly allow privileged installation scripts to execute.
+
+Sudo remains an intentionally synchronous human boundary in the CLI path.
 
 ---
 
@@ -869,7 +1209,7 @@ Suggested use:
 - `workspace/human_review/` — finished user-facing output
 - `workspace/scripts/` — reusable generated scripts
 
-`<cleanup/>` removes temporary workspace contents when requested by the model.
+`<cleanup/>` removes temporary workspace contents when requested by the model and also resets Adapt-managed task-boundary background state.
 
 ---
 
@@ -879,21 +1219,21 @@ Suggested use:
 
 Configurable areas include:
 
-- model provider
-- endpoint
-- model name
-- API key
-- prompts
-- external context file
-- tool-output summarizer
-- tool tags
-- enabled JSON tools
-- message-role names
-- memory paths
-- tool server
-- context thresholds
-- safety rules
-- command deny lists
+- model provider,
+- endpoint,
+- model name,
+- API key,
+- prompts,
+- external context file,
+- tool-output summarizer,
+- tool tags,
+- enabled JSON tools,
+- message-role names,
+- memory paths,
+- tool server,
+- context thresholds,
+- safety rules,
+- command deny lists.
 
 One goal of Adapt v5 is to keep deploy-time differences in configuration instead of requiring Rust changes wherever possible.
 
@@ -1024,6 +1364,8 @@ sudo ./setup_lockdown.sh
 | `Enter` | Submit current input |
 | `Backspace` | Delete input |
 
+Background-ready events are only surfaced through the idle-input path when the human is not in the middle of entering another request.
+
 The launcher supports several common Linux terminal emulators, including Konsole, GNOME Terminal, Kitty, Alacritty, XFCE Terminal, and xterm.
 
 ---
@@ -1032,12 +1374,25 @@ The launcher supports several common Linux terminal emulators, including Konsole
 
 Separate Adapt processes maintain independent:
 
-- model context
-- process IDs
-- active-session maps
-- internally namespaced tmux sessions
+- model context,
+- process IDs,
+- active-session maps,
+- internally namespaced tmux sessions,
+- background tracking state.
 
 This allows multiple independent conversations to use the same broader machine or workspace without sharing one global session namespace.
+
+---
+
+# Optional Adapt Server
+
+The repository also includes the optional Rust `adapt_server` component.
+
+It can be built separately and includes a simple browser-based chat interface for interacting with the runtime.
+
+The server is not intended to replace the primary terminal architecture in v5.2.
+
+Future v5.x UI work can build on the same underlying runtime while keeping the actual Adapt process and execution model intact.
 
 ---
 
@@ -1049,13 +1404,13 @@ Linux is the primary target.
 
 Adapt relies heavily on Unix/Linux behavior including:
 
-- `sh`
-- tmux
-- process execution
-- users and groups
-- filesystem permissions
-- sudo
-- common CLI utilities
+- `sh`,
+- tmux,
+- process execution,
+- users and groups,
+- filesystem permissions,
+- sudo,
+- common CLI utilities.
 
 ## Windows 11
 
@@ -1105,18 +1460,22 @@ I have also used Adapt through WSL2 on Windows 11.
 
 The local provider path is the primary regression-tested configuration.
 
+The v5.2 release was also tested against the current background execution, wait, lifecycle, tool-server, MCP, UI, and portability changes in the environments available to me.
+
 That does **not** mean every combination of:
 
-- Linux distribution
-- model
-- model server
-- GPU stack
-- cloud provider
-- chat template
-- tool-message role
-- terminal emulator
+- Linux distribution,
+- model,
+- model server,
+- GPU stack,
+- cloud provider,
+- chat template,
+- tool-message role,
+- terminal emulator,
+- MCP server,
+- or external tool service
 
-has been validated.
+Has been validated.
 
 It has not.
 
@@ -1144,11 +1503,11 @@ Even a short report such as:
 
 > "Works on Fedora."
 
-or:
+Or:
 
 > "This template rejects role: tool."
 
-is useful.
+Is useful.
 
 ---
 
@@ -1162,17 +1521,19 @@ However, one goal of the Echo project is to train tool behavior deeply enough th
 
 Echo training examples include multi-step workflows involving:
 
-- commands
-- persistent sessions
-- research
-- structured tools
-- web access
-- memory
-- debugging
-- file creation
-- error recovery
-- document workflows
-- autonomous multi-tool tasks
+- commands,
+- persistent sessions,
+- background execution,
+- wait behavior,
+- research,
+- structured tools,
+- web access,
+- memory,
+- debugging,
+- file creation,
+- error recovery,
+- document workflows,
+- autonomous multi-tool tasks.
 
 The current Echo Instroder model can follow the Adapt protocol with considerably less explicit protocol explanation than an untrained base model.
 
@@ -1198,16 +1559,20 @@ Adapt v5 is the latest Rust runtime in a longer sequence of Echo experiments.
 
 Earlier versions explored:
 
-- Python-based runtimes
-- separate tool processes
-- tmux wrappers
-- summarization services
-- different model/tool protocols
-- provider-specific experiments
+- Python-based runtimes,
+- separate tool processes,
+- tmux wrappers,
+- summarization services,
+- different model/tool protocols,
+- provider-specific experiments.
 
 Earlier Python designs required multiple independent processes for runtime services.
 
 Adapt v5 moved the core runtime into Rust and consolidated much of that lifecycle and execution logic into a single application.
+
+v5.1 concentrated on provider handling, restricted-user/lockdown operation, portability, file staging, tool-server foundations, and the earlier persistent-session supervision path.
+
+v5.2 extends that architecture with broader background execution, explicit waiting, automatic completion wake, lifecycle fencing, MCP/tool-server integration, and runtime UI/status improvements.
 
 Older repositories remain public because they document how the architecture evolved.
 
@@ -1221,16 +1586,18 @@ See:
 
 Adapt is not:
 
-- a perfect security sandbox
-- a replacement for Linux permissions
-- a guarantee that a model behaves correctly
-- tied to one model
-- tied to llama.cpp
-- dependent on LangChain
-- a native Windows runtime
-- a guarantee that every OpenAI-compatible provider behaves identically
-- a guarantee that cloud-provider data remains local
-- finished software
+- a perfect security sandbox,
+- a replacement for Linux permissions,
+- a guarantee that a model behaves correctly,
+- tied to one model,
+- tied to llama.cpp,
+- dependent on LangChain,
+- a native Windows runtime,
+- a guarantee that every OpenAI-compatible provider behaves identically,
+- a guarantee that cloud-provider data remains local,
+- a durable distributed task scheduler,
+- a guarantee that stale background processes cannot have already produced side effects,
+- finished software.
 
 It is an actively developed runtime for experimenting with models that can operate real tools over longer workflows.
 
@@ -1240,38 +1607,52 @@ Do not give a model access to anything you are unwilling for that process to tou
 
 # Roadmap
 
-Most major orchestration changes are intended for Adapt v6 rather than continuously expanding v5 into a different system.
+Most major orchestration changes are intended for later Adapt versions rather than continuously expanding v5 into a completely different system.
 
 Near-term v5.x work includes:
 
-- multimodal image input
-- continued provider compatibility testing
-- MCP/tool-server interoperability
-- background execution refinement
-- Linux portability testing
-- restricted/lockdown hardening
-- UI/runtime polish
+- browser/UI development over the existing terminal/process architecture,
+- terminal/session panes in a browser control surface,
+- clickable equivalents for existing hotkeys and process controls,
+- file-upload/path handoff into the active Adapt process,
+- multimodal image input,
+- continued provider compatibility testing,
+- additional background/lifecycle refinement,
+- Linux portability testing,
+- restricted/lockdown hardening,
+- UI/runtime polish.
 
-Larger v6 work is expected to explore:
+A likely v5.5 direction is a unified browser interface that sits on top of the existing Adapt process model rather than replacing it.
 
-- scheduled tasks
-- durable background model workers
-- task queues
-- persistent task IDs
-- saved/reloadable context
-- context restoration
-- integrated GUI
-- terminal/session views
-- thread switching
-- human-review workflows
-- stronger task persistence
-- shared execution services
+The intended concept is:
 
-v5 background supervision should not be confused with that larger design.
+```text
+browser thread
+    ↓
+selected Adapt process / terminal
+    ↓
+existing runtime
+```
 
-v5 allows **individual tool operations** to continue asynchronously.
+Each thread can remain its own process and context while the browser provides a cleaner control surface for chat, terminal output, uploads, interruption, and process switching.
 
-The planned v6 architecture extends that idea toward **entire persistent model tasks and workers**.
+Larger future work may explore:
+
+- scheduled tasks,
+- durable background model workers,
+- task queues,
+- persistent task IDs,
+- saved/reloadable context,
+- context restoration,
+- human-review workflows,
+- stronger task persistence,
+- shared execution services.
+
+v5.2 background supervision should not be confused with that larger design.
+
+v5.2 allows **individual tool operations** to continue asynchronously and re-enter the current agent loop.
+
+A future durable-worker architecture would extend that idea toward **entire persistent model tasks and workers**.
 
 ---
 
@@ -1281,17 +1662,17 @@ Adapt is intended to be understandable and modifiable.
 
 You can:
 
-- change the tool grammar
-- change the tool-result role
-- replace prompts
-- add JSON tools
-- add remote tools
-- connect MCP servers
-- change model providers
-- modify safety rules
-- adjust Linux permissions
-- change the workspace layout
-- train a model specifically for your protocol
+- change the tool grammar,
+- change the tool-result role,
+- replace prompts,
+- add JSON tools,
+- add remote tools,
+- connect MCP servers,
+- change model providers,
+- modify safety rules,
+- adjust Linux permissions,
+- change the workspace layout,
+- train a model specifically for your protocol.
 
 I would rather keep the runtime understandable than hide every mechanism behind another abstraction layer.
 
@@ -1309,14 +1690,14 @@ AI has been used extensively throughout the Echo project as an **interactive eng
 
 I use AI for:
 
-- architecture discussion
-- implementation iteration
-- debugging
-- compiler-error analysis
-- research
-- model-training troubleshooting
-- edge-case reasoning
-- explaining unfamiliar language/runtime behavior
+- architecture discussion,
+- implementation iteration,
+- debugging,
+- compiler-error analysis,
+- research,
+- model-training troubleshooting,
+- edge-case reasoning,
+- explaining unfamiliar language/runtime behavior.
 
 Different systems have helped with different parts of the project, including Grok, ChatGPT, and Gemini.
 
@@ -1334,7 +1715,17 @@ identify problem
 → test again
 ```
 
-I manually review, test, modify, and learn the code integrated into Adapt.
+The v5.2 background-execution work is a good example.
+
+The initial problem was simple: a long-running tool should not freeze the model's entire trajectory.
+
+That led to foreground windows, background supervision, immediate running-state feedback, pending queues, explicit wait semantics, automatic wake behavior, repeat-call recovery, stale-result fencing, and cleanup-boundary hardening.
+
+Those pieces were developed iteratively through architecture discussion, small Rust changes, compiler feedback, and live testing against the running model.
+
+AI helped accelerate that design-and-debug loop, but architectural decisions, integration choices, testing, and acceptance of changes remain part of the normal engineering process.
+
+I manually review, test, modify, and learn the code integrated into Adapt rather than treating generated output as something to paste blindly into the project.
 
 The public Echo repositories intentionally preserve that development history instead of presenting the current architecture as if it appeared fully formed.
 
@@ -1344,13 +1735,15 @@ The public Echo repositories intentionally preserve that development history ins
 
 Feedback is welcome, especially from users running Adapt with different:
 
-- Linux distributions
-- model servers
-- models
-- cloud providers
-- chat templates
-- terminal emulators
-- GPU stacks
+- Linux distributions,
+- model servers,
+- models,
+- cloud providers,
+- chat templates,
+- terminal emulators,
+- GPU stacks,
+- MCP servers,
+- external tool integrations.
 
 Open an issue with whatever information you have.
 
