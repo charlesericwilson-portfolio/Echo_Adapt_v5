@@ -2,6 +2,9 @@ mod registry;
 mod tools;
 mod config;
 mod mcp;
+#[path = "../../src/providers.rs"]
+mod providers;
+mod oracle;
 
 use std::{
     collections::HashMap,
@@ -17,7 +20,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use crate::registry::ServerToolRegistry;
-use crate::config::{InstanceSection, TavilySection};
+use crate::config::{InstanceSection, TavilySection, EndpointConfig};
 use crate::tools::web_search;
 
 #[derive(Clone)]
@@ -25,6 +28,7 @@ struct ToolServerState {
     registry: Arc<ServerToolRegistry>,
     auth_token: String,
     tavily: TavilySection,
+    oracle: Option<EndpointConfig>,
     global_tools: Vec<String>,
     instances: std::collections::HashMap<String, InstanceSection>,
     mcp_connections: Arc<HashMap<String, mcp::McpConnection>>,
@@ -108,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         registry,
         auth_token: config.server.auth_token.clone(),
         tavily: config.tavily.clone(),
+        oracle: config.oracle.clone(),
         global_tools: config.global.allowed_tools,
         instances: config.instances,
         mcp_connections: Arc::new(mcp_connections),
@@ -278,6 +283,49 @@ async fn execute_tool(
         )
         .await
         {
+            Ok(result) => (
+                StatusCode::OK,
+                Json(ExecuteResponse {
+                    result: Some(result),
+                    error: None,
+                }),
+            ),
+
+            Err(error) => (
+                StatusCode::BAD_REQUEST,
+                Json(ExecuteResponse {
+                    result: None,
+                    error: Some(error.to_string()),
+                }),
+            ),
+        };
+    }
+
+    if request.name == "oracle" {
+        let Some(config) = state.oracle.as_ref() else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ExecuteResponse {
+                    result: None,
+                    error: Some("Oracle is not configured".to_string()),
+                }),
+            );
+        };
+
+        let prompt = match request.arguments["prompt"].as_str() {
+            Some(prompt) if !prompt.trim().is_empty() => prompt,
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ExecuteResponse {
+                        result: None,
+                        error: Some("Missing or empty 'prompt' argument".to_string()),
+                    }),
+                );
+            }
+        };
+
+        return match oracle::oracle(prompt, config).await {
             Ok(result) => (
                 StatusCode::OK,
                 Json(ExecuteResponse {

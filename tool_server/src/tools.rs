@@ -25,6 +25,13 @@ pub fn all_tools() -> Vec<ServerTool> {
             arguments: "query: string".to_string(),
             execute: remote_only,
         },
+
+        ServerTool {
+            name: "oracle".to_string(),
+            description: "Consult a more capable language model for complex reasoning, knowledge, or problem solving.".to_string(),
+            arguments: "prompt: string".to_string(),
+            execute: remote_only,
+        },
     ]
 }
 

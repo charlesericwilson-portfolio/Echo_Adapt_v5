@@ -43,6 +43,19 @@ pub struct McpServerSection {
     pub env: HashMap<String, String>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct EndpointConfig {
+    pub provider: String,
+    pub url: String,
+    pub model: String,
+
+    #[serde(default)]
+    pub api_key: String,
+
+    pub temperature: f32,
+    pub max_tokens: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ToolServerConfig {
     pub server: ServerSection,
@@ -52,6 +65,9 @@ pub struct ToolServerConfig {
 
     #[serde(default)]
     pub mcp: McpSection,
+
+    #[serde(default)]
+    pub oracle: Option<EndpointConfig>,
 }
 
 pub fn load_config(path: &str) -> Result<ToolServerConfig, Box<dyn std::error::Error>> {
