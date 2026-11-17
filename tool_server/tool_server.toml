@@ -8,11 +8,19 @@ auth_token = "123456"
 url = "https://api.tavily.com/search"
 api_key = ""
 
+[oracle]
+provider = "openai_compatible"
+url = "https://api.openai.com/v1/chat/completions"
+model = "gpt-4.1"
+api_key = ""
+temperature = 0.3
+max_tokens = 4096
+
 [global]
 allowed_tools = ["web_search"]
 
 [instances.default]
-allowed_tools = ["echo_message"]
+allowed_tools = ["echo_message", "oracle"]
 
 [mcp]
 enabled = false
