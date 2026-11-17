@@ -1,5 +1,23 @@
 # Echo Adapt v5.2
 
+## 🆕 Latest Update — Oracle Tool
+
+**November 17, 2026**
+
+Adapt now includes **Oracle**, a native remote tool that allows smaller local language models to consult more capable cloud-based models for advanced reasoning, knowledge, and complex problem-solving.
+
+- Provider-agnostic API communication using Adapt's existing `providers.rs`.
+- Configurable model, endpoint, credentials, and generation parameters.
+- Instance-specific access control.
+- Asynchronous execution with existing background processing and wait functionality.
+- Prompt-only communication without automatically exposing conversation history.
+- Cloud responses returned directly to the local model as tool messages.
+- No additional dependencies or modifications to the core Adapt runtime.
+
+Oracle bridges the gap between local and frontier model capabilities while maintaining Adapt's local-first architecture.
+
+**Status:** Implementation complete and successfully compiled. Live API validation pending.
+
 ## ADAPT — Adaptive Digital Agent Protocol & Tools
 
 ### Local-first Rust agent runtime with persistent terminal sessions, asynchronous tool supervision, configurable model-provider support, remote tools, memory, and optional Linux isolation.
